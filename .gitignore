@@ -1,0 +1,24 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ---- 虚拟环境（不提交，太大且绑定本机路径）----
+venv/
+.venv/
+
+# ---- 敏感信息：API Key 绝对不能进 Git ----
+.env
+
+# ---- 运行产物 ----
+logs/
+outputs/
+reports/
+allure-results/
+allure-report/
+screenshots/
+error_pages/
+
+# 学习文档
+docs/

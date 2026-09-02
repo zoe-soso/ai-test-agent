@@ -1,0 +1,35 @@
+# 评测集 01：用户登录
+#
+# 这是**固定不变**的评测输入。每次改完 prompt 都拿它重跑一遍，
+# 结果存进 history.csv，Day 29 直接拉趋势图。
+#
+# core_scenarios：人工预设的核心场景清单，用来算"场景覆盖率"。
+#   判定方式很朴素：生成用例的 name / steps / expected 里
+#   出现了 keywords 中任意一个词，就算覆盖了这个场景。
+#   局限要心里有数——关键词匹配会漏掉"换个说法但其实覆盖了"的情况，
+#   所以它测的是**下限**，真实覆盖率只会比这个数字更高。
+#   好处是完全可复现、不依赖第二个模型来打分（那样既花钱又不可控）。
+
+id: login
+feature: 用户登录功能
+description: |
+  已注册用户通过邮箱 + 密码登录电商网站。
+  登录成功后页面顶部显示 "Logged in as 用户名"。
+  邮箱或密码错误时，页面提示 "Your email or password is incorrect!"。
+  邮箱和密码均为必填项，密码长度限制 1~128 位。
+
+core_scenarios:
+  - name: 正常登录成功
+    keywords: ["登录成功", "Logged in as"]
+  - name: 密码错误
+    keywords: ["密码错误", "incorrect", "错误密码"]
+  - name: 账号不存在
+    keywords: ["不存在", "未注册", "incorrect"]
+  - name: 邮箱为空
+    keywords: ["邮箱为空", "邮箱必填", "留空"]
+  - name: 密码为空
+    keywords: ["密码为空", "密码必填", "留空"]
+  - name: 超长输入
+    keywords: ["超长", "500", "128", "长度"]
+  - name: 特殊字符
+    keywords: ["特殊字符", "格式"]

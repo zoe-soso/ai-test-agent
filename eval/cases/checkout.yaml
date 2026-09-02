@@ -1,0 +1,25 @@
+# 评测集 05：下单结算
+
+id: checkout
+feature: 下单结算功能
+description: |
+  登录用户在购物车页点击结算，填写收货地址、选择配送方式和支付方式后提交订单。
+  必填项未填写时无法进入下一步，页面给出字段级错误提示。
+  支付信息非法时订单不生成。
+  下单成功后跳转订单确认页，页面显示 "Your order has been placed!"。
+
+core_scenarios:
+  - name: 下单成功
+    keywords: ["下单成功", "order has been placed", "订单确认"]
+  - name: 收货地址为空
+    keywords: ["地址", "为空", "必填"]
+  - name: 未选配送方式
+    keywords: ["配送", "未选择", "必选"]
+  - name: 未选支付方式
+    keywords: ["支付", "未选择", "必选"]
+  - name: 支付信息非法
+    keywords: ["支付", "非法", "卡号", "失败"]
+  - name: 未登录下单
+    keywords: ["未登录", "登录", "跳转"]
+  - name: 库存不足
+    keywords: ["库存", "售罄", "不足"]

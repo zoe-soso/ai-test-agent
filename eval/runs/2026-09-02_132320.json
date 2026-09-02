@@ -1,0 +1,118 @@
+{
+  "timestamp": "2026-09-02 13:23:20",
+  "prompt_version": "testcase_v2_json",
+  "mode": "mock",
+  "results": [
+    {
+      "case_id": "cart",
+      "structure_rate": 1.0,
+      "coverage_rate": 0.3333333333333333,
+      "covered": [
+        "购物车为空",
+        "数量边界值"
+      ],
+      "missed": [
+        "加入购物车成功",
+        "修改数量",
+        "删除商品",
+        "金额计算"
+      ],
+      "cases_valid": 8,
+      "cases_total": 8,
+      "total_tokens": 1406,
+      "cost_yuan": 0.008122,
+      "repairs": 0,
+      "attempts": 1,
+      "error": ""
+    },
+    {
+      "case_id": "checkout",
+      "structure_rate": 1.0,
+      "coverage_rate": 0.42857142857142855,
+      "covered": [
+        "收货地址为空",
+        "支付信息非法",
+        "未登录下单"
+      ],
+      "missed": [
+        "下单成功",
+        "未选配送方式",
+        "未选支付方式",
+        "库存不足"
+      ],
+      "cases_valid": 8,
+      "cases_total": 8,
+      "total_tokens": 1413,
+      "cost_yuan": 0.008166,
+      "repairs": 0,
+      "attempts": 1,
+      "error": ""
+    },
+    {
+      "case_id": "login",
+      "structure_rate": 1.0,
+      "coverage_rate": 1.0,
+      "covered": [
+        "正常登录成功",
+        "密码错误",
+        "账号不存在",
+        "邮箱为空",
+        "密码为空",
+        "超长输入",
+        "特殊字符"
+      ],
+      "missed": [],
+      "cases_valid": 8,
+      "cases_total": 8,
+      "total_tokens": 1434,
+      "cost_yuan": 0.008322,
+      "repairs": 0,
+      "attempts": 1,
+      "error": ""
+    },
+    {
+      "case_id": "register",
+      "structure_rate": 0.8888888888888888,
+      "coverage_rate": 0.8333333333333334,
+      "covered": [
+        "注册成功",
+        "邮箱已被注册",
+        "密码长度不足",
+        "邮箱格式非法",
+        "必填项为空"
+      ],
+      "missed": [
+        "两次密码不一致"
+      ],
+      "cases_valid": 8,
+      "cases_total": 9,
+      "total_tokens": 3566,
+      "cost_yuan": 0.018118,
+      "repairs": 1,
+      "attempts": 2,
+      "error": ""
+    },
+    {
+      "case_id": "search",
+      "structure_rate": 1.0,
+      "coverage_rate": 0.6666666666666666,
+      "covered": [
+        "搜索无结果",
+        "关键词为空",
+        "超长关键词",
+        "特殊字符关键词"
+      ],
+      "missed": [
+        "搜索到匹配商品",
+        "分页"
+      ],
+      "cases_valid": 8,
+      "cases_total": 8,
+      "total_tokens": 1412,
+      "cost_yuan": 0.008164,
+      "repairs": 0,
+      "attempts": 1,
+      "error": ""
+    }
+  ]
+}

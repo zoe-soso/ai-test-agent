@@ -1,0 +1,23 @@
+# 评测集 04：购物车
+
+id: cart
+feature: 购物车功能
+description: |
+  登录用户可将商品加入购物车，在购物车页修改商品数量、删除商品。
+  数量修改后小计金额实时更新，删除商品后列表刷新。
+  购物车为空时提示 "Your shopping cart is empty!"
+  单件商品数量上限 99，输入 0 或负数时按 1 处理。
+
+core_scenarios:
+  - name: 加入购物车成功
+    keywords: ["加入购物车", "添加成功", "购物车"]
+  - name: 修改数量
+    keywords: ["修改数量", "数量", "更新"]
+  - name: 删除商品
+    keywords: ["删除", "移除"]
+  - name: 购物车为空
+    keywords: ["为空", "empty", "空购物车"]
+  - name: 数量边界值
+    keywords: ["99", "0", "负数", "边界"]
+  - name: 金额计算
+    keywords: ["小计", "金额", "总价", "计算"]

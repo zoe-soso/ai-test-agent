@@ -1,0 +1,158 @@
+{
+  "timestamp": "2026-09-02 15:49:05",
+  "prompt_version": "testcase_v3_method",
+  "mode": "mock",
+  "results": [
+    {
+      "case_id": "cart",
+      "structure_rate": 1.0,
+      "coverage_rate": 0.3333333333333333,
+      "method_coverage": 1.0,
+      "methods_used": [
+        "判定表",
+        "场景法",
+        "异常测试",
+        "等价类划分",
+        "边界值分析"
+      ],
+      "covered": [
+        "购物车为空",
+        "数量边界值"
+      ],
+      "missed": [
+        "加入购物车成功",
+        "修改数量",
+        "删除商品",
+        "金额计算"
+      ],
+      "cases_valid": 8,
+      "cases_total": 8,
+      "total_tokens": 1713,
+      "cost_yuan": 0.009336,
+      "repairs": 0,
+      "attempts": 1,
+      "error": ""
+    },
+    {
+      "case_id": "checkout",
+      "structure_rate": 1.0,
+      "coverage_rate": 0.42857142857142855,
+      "method_coverage": 1.0,
+      "methods_used": [
+        "判定表",
+        "场景法",
+        "异常测试",
+        "等价类划分",
+        "边界值分析"
+      ],
+      "covered": [
+        "收货地址为空",
+        "支付信息非法",
+        "未登录下单"
+      ],
+      "missed": [
+        "下单成功",
+        "未选配送方式",
+        "未选支付方式",
+        "库存不足"
+      ],
+      "cases_valid": 8,
+      "cases_total": 8,
+      "total_tokens": 1720,
+      "cost_yuan": 0.00938,
+      "repairs": 0,
+      "attempts": 1,
+      "error": ""
+    },
+    {
+      "case_id": "login",
+      "structure_rate": 1.0,
+      "coverage_rate": 1.0,
+      "method_coverage": 1.0,
+      "methods_used": [
+        "判定表",
+        "场景法",
+        "异常测试",
+        "等价类划分",
+        "边界值分析"
+      ],
+      "covered": [
+        "正常登录成功",
+        "密码错误",
+        "账号不存在",
+        "邮箱为空",
+        "密码为空",
+        "超长输入",
+        "特殊字符"
+      ],
+      "missed": [],
+      "cases_valid": 8,
+      "cases_total": 8,
+      "total_tokens": 1740,
+      "cost_yuan": 0.009528,
+      "repairs": 0,
+      "attempts": 1,
+      "error": ""
+    },
+    {
+      "case_id": "register",
+      "structure_rate": 0.8888888888888888,
+      "coverage_rate": 0.8333333333333334,
+      "method_coverage": 1.0,
+      "methods_used": [
+        "判定表",
+        "场景法",
+        "异常测试",
+        "等价类划分",
+        "边界值分析"
+      ],
+      "covered": [
+        "注册成功",
+        "邮箱已被注册",
+        "密码长度不足",
+        "邮箱格式非法",
+        "必填项为空"
+      ],
+      "missed": [
+        "两次密码不一致"
+      ],
+      "cases_valid": 8,
+      "cases_total": 9,
+      "total_tokens": 4074,
+      "cost_yuan": 0.020333999999999998,
+      "repairs": 1,
+      "attempts": 2,
+      "error": ""
+    },
+    {
+      "case_id": "search",
+      "structure_rate": 1.0,
+      "coverage_rate": 0.6666666666666666,
+      "method_coverage": 1.0,
+      "methods_used": [
+        "判定表",
+        "场景法",
+        "异常测试",
+        "等价类划分",
+        "边界值分析"
+      ],
+      "covered": [
+        "搜索无结果",
+        "关键词为空",
+        "超长关键词",
+        "特殊字符关键词"
+      ],
+      "missed": [
+        "搜索到匹配商品",
+        "分页"
+      ],
+      "cases_valid": 8,
+      "cases_total": 8,
+      "total_tokens": 1719,
+      "cost_yuan": 0.009378000000000001,
+      "repairs": 0,
+      "attempts": 1,
+      "error": ""
+    }
+  ]
+}

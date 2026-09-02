@@ -1,0 +1,24 @@
+# 评测集 02：用户注册
+
+id: register
+feature: 用户注册功能
+description: |
+  新用户填写邮箱、密码、确认密码完成注册。
+  邮箱需符合基本格式且未被注册过。
+  两次输入的密码必须一致，密码长度要求 8~32 位。
+  注册成功后自动登录，页面顶部显示 "Logged in as 用户名"。
+  邮箱已被占用时提示 "Email Address already exist!"。
+
+core_scenarios:
+  - name: 注册成功
+    keywords: ["注册成功", "Logged in as", "自动登录"]
+  - name: 邮箱已被注册
+    keywords: ["已注册", "already exist", "重复", "占用"]
+  - name: 两次密码不一致
+    keywords: ["不一致", "确认密码", "不匹配"]
+  - name: 密码长度不足
+    keywords: ["8位", "8 位", "长度", "太短", "过短"]
+  - name: 邮箱格式非法
+    keywords: ["格式", "非法", "@", "特殊字符"]
+  - name: 必填项为空
+    keywords: ["为空", "必填", "留空"]

@@ -1,0 +1,11 @@
+date,prompt_version,case_id,structure_rate,coverage_rate,cases_valid,cases_total,total_tokens,cost_yuan,repairs,attempts,mode
+2026-09-02,testcase_v2_json,cart,1.0000,0.3333,8,8,1406,0.008122,0,1,mock
+2026-09-02,testcase_v2_json,checkout,1.0000,0.4286,8,8,1413,0.008166,0,1,mock
+2026-09-02,testcase_v2_json,login,1.0000,1.0000,8,8,1434,0.008322,0,1,mock
+2026-09-02,testcase_v2_json,register,0.8889,0.8333,8,9,3566,0.018118,1,2,mock
+2026-09-02,testcase_v2_json,search,1.0000,0.6667,8,8,1412,0.008164,0,1,mock
+2026-09-02,testcase_v3_method,cart,1.0000,0.3333,1.0000,8,8,1713,0.009336,0,1,mock
+2026-09-02,testcase_v3_method,checkout,1.0000,0.4286,1.0000,8,8,1720,0.009380,0,1,mock
+2026-09-02,testcase_v3_method,login,1.0000,1.0000,1.0000,8,8,1740,0.009528,0,1,mock
+2026-09-02,testcase_v3_method,register,0.8889,0.8333,1.0000,8,9,4074,0.020334,1,2,mock
+2026-09-02,testcase_v3_method,search,1.0000,0.6667,1.0000,8,8,1719,0.009378,0,1,mock

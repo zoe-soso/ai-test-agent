@@ -1,0 +1,22 @@
+# 评测集 03：商品搜索
+
+id: search
+feature: 商品搜索功能
+description: |
+  用户在顶部搜索框输入关键词，点击搜索按钮后展示商品列表。
+  搜索结果为空时，页面提示 "There is no product that matches the search criteria."
+  支持按商品名称模糊匹配，搜索结果分页展示，每页 12 条。
+
+core_scenarios:
+  - name: 搜索到匹配商品
+    keywords: ["匹配", "搜索结果", "展示", "列表"]
+  - name: 搜索无结果
+    keywords: ["无结果", "no product", "matches", "空"]
+  - name: 关键词为空
+    keywords: ["为空", "空关键词", "留空", "必填"]
+  - name: 超长关键词
+    keywords: ["超长", "长度", "500"]
+  - name: 特殊字符关键词
+    keywords: ["特殊字符", "转义", "注入"]
+  - name: 分页
+    keywords: ["分页", "12", "下一页"]
