@@ -49,6 +49,20 @@ LLM_TIMEOUT: int = int(os.getenv("LLM_TIMEOUT", "60"))       # 秒
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2048"))
 
+# 生成测试数据时要**单独放宽**（Day 12）。
+#
+# 为什么数据生成需要的额度比用例大得多？
+#     用例是文字描述，一条几十个字；
+#     数据里可能包含 500 字符的超长密码 —— 光这一个值就占几百 token，
+#     10 组数据加起来轻松突破 4096。
+#     被截断时不会报错，只是 JSON 写了一半，表现为"解析失败"，极难排查
+#     （Day 12 踩过这个坑：真正的线索只有 finish_reason=length，
+#      所以 llm_client 里专门加了截断检测）。
+#
+# 注意：max_tokens 是**上限**不是目标，调大不会直接增加费用，
+# 只有模型真的写那么长才会计费。
+LLM_MAX_TOKENS_DATA: int = int(os.getenv("LLM_MAX_TOKENS_DATA", "8192"))
+
 # 离线演练开关（Day 5 会解释为什么需要它）
 #   "auto"  —— 没配 Key 就自动用 Mock，配了就走真实调用（默认，最省心）
 #   "true"  —— 强制 Mock，不花钱也能反复跑通流程

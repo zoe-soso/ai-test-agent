@@ -358,6 +358,35 @@ class LLMClient:
         else:
             logger.info("LLM 返回：耗时 %.2fs（响应中没有 usage 字段）", cost)
 
+        # ---- 截断检测（Day 12 补上）----
+        #
+        # 这是 LLM 应用里最阴险的一类故障，特点是没有明显症状：
+        #   - HTTP 状态码 200，不报错
+        #   - 返回的内容看起来就是正常的 JSON，只是**没写完**
+        #   - 下游解析失败时，你会以为是"模型格式又乱了"，
+        #     回头改 prompt、加自修正，折腾半天 ——
+        #     其实真正的原因是自己的 max_tokens 设小了
+        #
+        # finish_reason == "length" 是唯一的线索，必须在这里抓住并明确报出来。
+        try:
+            finish_reason = response.choices[0].finish_reason
+        except (AttributeError, IndexError):
+            finish_reason = None
+
+        if finish_reason == "length":
+            self.usage.count_error()
+            limit = max_tokens or self.max_tokens
+            logger.error(
+                "模型输出被截断：finish_reason=length，当前 max_tokens=%s。"
+                "内容不完整，JSON 大概率解析失败。", limit,
+            )
+            raise LLMResponseError(
+                f"模型输出被 max_tokens={limit} 截断，内容不完整。"
+                f"请调大 LLM_MAX_TOKENS，或减少单次生成的内容量"
+                f"（例如减少数据组数、缩短超长数据的长度）。",
+                model=self.model,
+            )
+
         try:
             content = response.choices[0].message.content
         except (AttributeError, IndexError) as exc:
@@ -388,6 +417,146 @@ class LLMClient:
             raise LLMResponseError(
                 f"返回内容不是合法 JSON：{exc}", model=self.model
             ) from exc
+
+
+    # ------------------------------------------------------------------
+    # 工具调用（Day 13）
+    # ------------------------------------------------------------------
+    def chat_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: str = "auto",
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        retries: int = 2,
+    ) -> Any:
+        """让模型在给定工具里挑一个调用，返回带工具调用请求的消息。
+
+        为什么单独一个方法？
+            Tool Calling（Day 13）和"纯聊天"是两种不同的 API 用法：
+            普通 chat 只问一句话；工具调用要在请求里带上 tools 列表，
+            模型可能返回"我要调某个工具"而不是文字。返回结构也不同，
+            所以这里直接返回 `AssistantMessage`（含 tool_calls），
+            而不是一段字符串。
+
+        tool_choice="auto"：让模型自己决定调不调、调哪个；
+        tool_choice="none"：强制模型只说文字、不许调工具
+        （用于"最后该收尾了，别再调工具"的场景）。
+
+        失败同样自动重试，和 chat_messages 一致。
+        """
+        from agent.tool_calling import AssistantMessage, ToolCall
+
+        if self.is_mock:
+            logger.warning("当前为 Mock 模式，chat_with_tools 返回一段说明文本（不含工具调用）")
+            return AssistantMessage(
+                content="（离线模式：未真实调用工具，直接返回说明文本）",
+                tool_calls=[],
+            )
+
+        last_error: Exception | None = None
+        for attempt in range(1, retries + 1):
+            try:
+                return self._request_with_tools(
+                    messages, tools, tool_choice, temperature, max_tokens
+                )
+            except LLMRequestError as exc:
+                last_error = exc
+                if attempt == retries:
+                    break
+                wait = attempt * 2
+                logger.warning(
+                    "第 %d/%d 次工具调用失败，%d 秒后重试：%s", attempt, retries, wait, exc
+                )
+                time.sleep(wait)
+
+        raise LLMRequestError(
+            f"工具调用失败（已重试 {retries} 次）：{last_error}",
+            model=self.model,
+            base_url=self.base_url,
+        )
+
+    def _request_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: str,
+        temperature: float | None,
+        max_tokens: int | None,
+    ) -> Any:
+        """真正发一次带 tools 的请求，并把返回解析成 AssistantMessage。
+
+        把解析逻辑单独抽出来，和 _request 对称，也方便以后加测试桩。
+        """
+        from agent.tool_calling import AssistantMessage, ToolCall
+
+        client = self._ensure_client()
+
+        total_chars = sum(len(m.get("content", "")) for m in messages)
+        logger.info(
+            "工具调用 LLM：model=%s，messages=%d 条，tools=%d 个，共 %d 字符",
+            self.model, len(messages), len(tools), total_chars,
+        )
+        started = time.perf_counter()
+
+        try:
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                temperature=self.temperature if temperature is None else temperature,
+                max_tokens=max_tokens or self.max_tokens,
+            )
+        except Exception as exc:  # openai 异常类型很多，统一收敛
+            self.usage.count_error()
+            logger.error("工具调用请求异常：%s: %s", type(exc).__name__, exc)
+            raise LLMRequestError(
+                f"{type(exc).__name__}: {exc}",
+                model=self.model,
+                error_type=type(exc).__name__,
+            ) from exc
+
+        cost = time.perf_counter() - started
+
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            self.usage.add(usage)
+            logger.info(
+                "工具调用返回：耗时 %.2fs，prompt=%s，completion=%s，total=%s | 累计 %s",
+                cost,
+                getattr(usage, "prompt_tokens", "?"),
+                getattr(usage, "completion_tokens", "?"),
+                getattr(usage, "total_tokens", "?"),
+                self.usage,
+            )
+        else:
+            logger.info("工具调用返回：耗时 %.2fs（无 usage 字段）", cost)
+
+        message = response.choices[0].message
+        content = message.content
+
+        tool_calls: list[ToolCall] = []
+        for raw_call in (message.tool_calls or []):
+            try:
+                arguments = json.loads(raw_call.function.arguments or "{}")
+            except json.JSONDecodeError:
+                # 模型偶尔会吐出非法 JSON，宁可当成空参数，也不让整轮崩溃
+                logger.warning("工具 %s 的参数不是合法 JSON，按空参数处理", raw_call.function.name)
+                arguments = {}
+            tool_calls.append(ToolCall(
+                id=raw_call.id,
+                name=raw_call.function.name,
+                arguments=arguments,
+            ))
+
+        logger.info(
+            "模型返回：%s工具调用 x%d",
+            "有" if tool_calls else "无",
+            len(tool_calls),
+        )
+        return AssistantMessage(content=content, tool_calls=tool_calls)
 
 
 # ----------------------------------------------------------------------

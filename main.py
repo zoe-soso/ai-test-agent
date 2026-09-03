@@ -7,6 +7,7 @@
     python main.py build                 # Day 3  需求 -> 测试用例 YAML
     python main.py llm "你的问题"         # Day 5  第一次调用大模型
     python main.py prompt-compare        # Day 6  Prompt A/B 对比实验
+    python main.py review --fix          # Day 11 用例质量评审（并自动修改）
 
 知识点：argparse 子命令
     比自己解析 sys.argv 好在哪？
@@ -23,6 +24,7 @@ import time
 from pathlib import Path
 
 from config import settings
+from tools.exceptions import AgentError
 from tools.logger import get_logger
 
 logger = get_logger("main")
@@ -308,11 +310,286 @@ def cmd_gen(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_cases_for_review(
+    args: argparse.Namespace, client: object
+) -> tuple[list, str]:
+    """取待评审的用例（返回 用例列表 + 来源说明）。
+
+    两种来源：
+        1. --input 指定了 YAML —— 评审已有的用例（实际最常用的姿势）
+        2. 没指定 —— 走一遍生成链路现造一批（一条命令演示全流程时方便）
+    """
+    from agent import structured, validator
+    from tools import file_io
+
+    if args.input:
+        data = file_io.read_yaml(args.input)
+        raws = data.get("cases", []) if isinstance(data, dict) else data
+        passed, _, failed = validator.validate_cases(raws, feature_key="AUTO")
+        note = f"文件 {args.input}"
+        if failed:
+            note += f"（{len(failed)} 条不合格已剔除）"
+        return passed, note
+
+    result = structured.generate(
+        args.feature, args.description,
+        template=args.template, client=client,  # type: ignore[arg-type]
+    )
+    return result.cases, f"现场生成（{result.attempts} 次调用）"
+
+
+def cmd_review(args: argparse.Namespace) -> int:
+    """Day 11：生成 -> Review -> 修改 的质量闭环。"""
+    from agent import llm_client, reviewer
+    from tools import file_io
+
+    client = llm_client.get_client()
+
+    print("=" * 58)
+    print("  Day 11：测试用例质量检查（Review）")
+    print("=" * 58)
+    print(f"  功能     : {args.feature}")
+    print(f"  LLM 评审 : {'开启' if not args.rule_only else '关闭（仅规则层，零成本）'}")
+    print(f"  修改闭环 : {'开启' if args.fix else '关闭（只评审，不改用例）'}")
+    print(f"  运行模式 : {'Mock（离线）' if client.is_mock else '真实调用'}")
+    print("=" * 58)
+
+    # ---- 1. 取待评审用例 ----
+    try:
+        cases, source = _load_cases_for_review(args, client)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("读取待评审用例失败：%s", exc)
+        print(f"\n[ERROR] 读取用例失败：{exc}")
+        return 1
+
+    if not cases:
+        print("\n[ERROR] 没有可评审的用例。")
+        return 1
+
+    print(f"\n[1/3] 待评审用例 {len(cases)} 条（来源：{source}）")
+
+    # ---- 2. 评审（可选：评审后自动修改）----
+    use_llm = not args.rule_only
+    if args.fix:
+        final, report, rounds = reviewer.review_and_revise(
+            args.feature, cases, client=client,
+            max_rounds=args.max_rounds, use_llm=use_llm,
+        )
+    else:
+        report = reviewer.review(args.feature, cases, client=client, use_llm=use_llm)
+        final, rounds = cases, 0
+
+    print(f"[2/3] 评审完成：{report.describe()}")
+    print("\n【评审摘要】")
+    for key, value in report.summary().items():
+        print(f"  {key} : {value}")
+
+    # ---- 3. 问题明细 ----
+    if report.issues:
+        print("\n【问题清单】")
+        for issue in report.sorted_issues():
+            print(f"  {issue}")
+    else:
+        print("\n【问题清单】无 —— 用例质量合格")
+
+    if report.overall:
+        print(f"\n【LLM 总评】{report.overall}")
+    if report.missing_scenarios:
+        print(f"\n【遗漏场景】{'、'.join(report.missing_scenarios)}")
+
+    # ---- 4. 落盘 ----
+    print("\n[3/3] 结果处理")
+    if args.fix:
+        suite = {"feature": args.feature, "cases": final}
+        out = Path(args.out)
+        file_io.write_yaml(out, suite)
+        print(f"  修改轮数 : {rounds}")
+        print(f"  用例变化 : {len(cases)} 条 -> {len(final)} 条")
+        print(f"  已写入   : {out}")
+    else:
+        print("  未开启 --fix，用例未改动（加 --fix 可让 LLM 按意见修改）。")
+
+    print(f"\n本次消耗：{client.usage}")
+    return 0
+
+
+def _preview_fields(fields: dict) -> str:
+    """把一组数据压成一行预览。
+
+    超长值必须截断：500 字符的密码会把整个控制台刷屏，
+    而且那种情况下你真正需要知道的只是"它有多长"。
+    """
+    parts = []
+    for key, value in fields.items():
+        text = str(value)
+        if len(text) > 40:
+            text = f"{text[:37]}...（共 {len(str(value))} 字符）"
+        parts.append(f'{key}="{text}"')
+    return "  ".join(parts)
+
+
+def cmd_gen_data(args: argparse.Namespace) -> int:
+    """Day 12：生成测试数据。"""
+    from agent import llm_client, validator
+    from agent.testdata_generator import TestDataGenerator
+    from tools import file_io
+
+    client = llm_client.get_client()
+
+    print("=" * 58)
+    print("  Day 12：测试数据生成")
+    print("=" * 58)
+    print(f"  功能     : {args.feature}")
+    print(f"  参数     : {'、'.join(args.params) if args.params else '（由模型判断）'}")
+    print(f"  运行模式 : {'Mock（离线）' if client.is_mock else '真实调用'}")
+    print("=" * 58)
+
+    # 可选：加载用例，把数据挂到用例上
+    cases = None
+    if args.link:
+        try:
+            payload = file_io.read_yaml(args.link)
+            raws = payload.get("cases", []) if isinstance(payload, dict) else payload
+            cases, _, _ = validator.validate_cases(raws, feature_key="AUTO")
+            print(f"\n[关联] 已加载 {len(cases)} 条用例，数据将挂到对应用例上")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("加载关联用例失败，将跳过关联：%s", exc)
+
+    generator = TestDataGenerator(client=client, max_repairs=args.max_repairs)
+    suite, report = generator.generate(
+        args.feature, args.description,
+        params=args.params or None, cases=cases,
+    )
+    saved = generator.save(suite, args.out)
+
+    print("\n【生成摘要】")
+    for key, value in report.to_dict().items():
+        print(f"  {key} : {value}")
+
+    # 数据质量检查（纯规则，不花钱）
+    problems = generator.quality_check(suite["data"])
+    if problems:
+        print(f"\n【数据质量检查】发现 {len(problems)} 处问题：")
+        for problem in problems:
+            print(f"  [!] {problem}")
+    else:
+        print("\n【数据质量检查】未发现占位符数据，超长数据长度也达标")
+
+    print(f"\n【测试数据 {len(suite['data'])} 组】")
+    for item in suite["data"]:
+        link = item.get("link_case")
+        suffix = f"  -> {link}" if link else ""
+        print(f"  [{item['data_type']}] {item['id']} {item['name']}{suffix}")
+        print(f"      {_preview_fields(item['fields'])}")
+
+    print(f"\n已写入 YAML：{saved}")
+    print(f"本次消耗：{client.usage}")
+    return 0
+
+
 def cmd_eval(args: argparse.Namespace) -> int:
     """Day 7：跑一遍评测集，算结构可用率 / 场景覆盖率 / 成本。"""
     from eval import run_eval
 
     return run_eval.main(template=args.template, max_repairs=args.max_repairs)
+
+
+def cmd_agent(args: argparse.Namespace) -> int:
+    """Day 14：第一个可演示的 Agent MVP（生成 → Review → 落盘）。"""
+    from agent import llm_client
+    from agent.planner import TestCaseAgent
+
+    client = llm_client.get_client()
+
+    print("=" * 58)
+    print("  Day 14：测试用例生成 Agent（MVP）")
+    print("=" * 58)
+    print(f"  需求     : {args.feature}")
+    print(f"  自动修改 : {'开启' if not args.no_fix else '关闭'}")
+    print(f"  LLM 评审 : {'开启' if not args.rule_only else '关闭（仅规则层）'}")
+    print(f"  运行模式 : {'Mock（离线）' if client.is_mock else '真实调用'}")
+    print("=" * 58)
+
+    agent = TestCaseAgent(
+        client=client,
+        template=args.template,
+        auto_fix=not args.no_fix,
+        use_llm=not args.rule_only,
+        max_repairs=args.max_repairs,
+    )
+
+    try:
+        result = agent.run(args.feature, args.description,
+                           cases_path=args.out, review_path=args.review_out)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Agent 运行失败：%s", exc, exc_info=True)
+        print(f"\n[ERROR] {exc}")
+        return 1
+
+    print("\n【运行结果】")
+    for key, value in result.summary().items():
+        print(f"  {key} : {value}")
+
+    if result.review.issues:
+        print("\n【评审问题】")
+        for issue in result.review.sorted_issues():
+            print(f"  {issue}")
+    else:
+        print("\n【评审问题】无 —— 用例质量合格")
+
+    if result.review.overall:
+        print(f"\n【LLM 总评】{result.review.overall}")
+
+    print(f"\n已写入：\n  - 用例  : {result.cases_path}\n  - 评审  : {result.review_path}")
+    print(f"本次消耗：{client.usage}")
+    return 0
+
+
+def cmd_tools(args: argparse.Namespace) -> int:
+    """Day 13：Tool Calling 演示 —— 让模型自己决定调用哪个工具。
+
+    这条命令不预设流程，而是把一个自由指令交给 Agent：
+    模型读完工具清单后，自己决定调不调、先调哪个。
+    这是 Tool Calling 和"写死流程"最大的区别 —— 控制权在模型手里。
+
+    示例：
+        python main.py tools "帮我把用户登录功能的测试用例生成并保存"
+    """
+    from agent import llm_client
+    from agent import agent_tools
+    from agent.tool_calling import run_tool_loop
+
+    client = llm_client.get_client()
+
+    print("=" * 58)
+    print("  Day 13：Tool Calling 演示（工具循环）")
+    print("=" * 58)
+    print(f"  可用工具 : {', '.join(agent_tools.registry.names)}")
+    print(f"  运行模式 : {'Mock（离线）' if client.is_mock else '真实调用'}")
+    print(f"  指令     : {args.instruction}")
+    print("=" * 58)
+
+    messages = [
+        {"role": "system", "content": agent_tools.build_system_prompt()},
+        {"role": "user", "content": args.instruction},
+    ]
+
+    result = run_tool_loop(
+        client, messages, agent_tools.registry,
+        max_iterations=args.max_iterations,
+    )
+
+    print("\n【工具调用轨迹】")
+    if result.steps:
+        for step in result.steps:
+            print(step)
+    else:
+        print("  （模型没有调用任何工具，直接回答了）")
+
+    print(f"\n【循环轮数】{result.iterations} ｜ 结束原因：{result.stopped_reason}")
+    print(f"\n【模型最终答复】\n{result.answer}")
+    return 0
+
 
 
 # ----------------------------------------------------------------------
@@ -378,6 +655,55 @@ def build_parser() -> argparse.ArgumentParser:
     p_gen.add_argument("--max-repairs", type=int, default=1, help="最多自修正几次")
     p_gen.set_defaults(func=cmd_gen)
 
+    p_review = sub.add_parser(
+        "review", help="Day 11：评审测试用例质量（加 --fix 让 LLM 按意见修改）"
+    )
+    p_review.add_argument("--feature", default="用户登录功能", help="被测功能名")
+    p_review.add_argument("--description", default="（无额外描述）", help="需求描述")
+    p_review.add_argument(
+        "--input", default="",
+        help="待评审的用例 YAML 文件；不填则现场生成一批",
+    )
+    p_review.add_argument(
+        "--template", default=structured.DEFAULT_TEMPLATE,
+        help="现场生成用例时用的 prompt 模板名",
+    )
+    p_review.add_argument(
+        "--fix", action="store_true", help="评审后让 LLM 按意见修改用例",
+    )
+    p_review.add_argument("--max-rounds", type=int, default=1, help="最多修改几轮")
+    p_review.add_argument(
+        "--rule-only", action="store_true",
+        help="评审阶段不调用 LLM，只跑规则层（配合 --input 时为真正的零成本）",
+    )
+    p_review.add_argument(
+        "--out",
+        default=str(root / "outputs" / "testcases_reviewed.yaml"),
+        help="--fix 时，修改后用例的输出路径",
+    )
+    p_review.set_defaults(func=cmd_review)
+
+    p_data = sub.add_parser(
+        "gen-data", help="Day 12：生成测试数据（数据驱动测试的基础）"
+    )
+    p_data.add_argument("--feature", default="用户登录功能", help="被测功能名")
+    p_data.add_argument("--description", default="（无额外描述）", help="需求描述")
+    p_data.add_argument(
+        "--params", nargs="*", default=[],
+        help="参数名清单，如 --params username password；不填则由模型判断",
+    )
+    p_data.add_argument(
+        "--link", default="",
+        help="用例 YAML 路径；填了就把数据关联到对应用例上",
+    )
+    p_data.add_argument("--max-repairs", type=int, default=1, help="最多自修正几次")
+    p_data.add_argument(
+        "--out",
+        default=str(root / "outputs" / "testdata.yaml"),
+        help="输出的 YAML 路径",
+    )
+    p_data.set_defaults(func=cmd_gen_data)
+
     p_eval = sub.add_parser("eval", help="Day 7 演示：跑评测集并记入 history.csv")
     p_eval.add_argument(
         "--template", default=structured.DEFAULT_TEMPLATE, help="prompt 模板名"
@@ -385,15 +711,73 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--max-repairs", type=int, default=1, help="最多自修正几次")
     p_eval.set_defaults(func=cmd_eval)
 
+    p_agent = sub.add_parser(
+        "agent", help="Day 14：测试用例生成 Agent MVP（生成 → Review → 落盘）"
+    )
+    p_agent.add_argument("--feature", default="用户登录功能", help="被测功能名")
+    p_agent.add_argument("--description", default="（无额外描述）", help="需求描述")
+    p_agent.add_argument(
+        "--template", default=structured.DEFAULT_TEMPLATE, help="生成用例用的 prompt 模板名"
+    )
+    p_agent.add_argument(
+        "--no-fix", action="store_true",
+        help="生成后不自动按评审意见修改（只评审、不改）",
+    )
+    p_agent.add_argument(
+        "--rule-only", action="store_true",
+        help="评审阶段不调用 LLM，只跑规则层（零成本）",
+    )
+    p_agent.add_argument("--max-repairs", type=int, default=1, help="生成/修改最多自修正几次")
+    p_agent.add_argument(
+        "--out",
+        default=str(root / "outputs" / "testcases_ai.yaml"),
+        help="生成的用例输出路径",
+    )
+    p_agent.add_argument(
+        "--review-out",
+        default=str(root / "outputs" / "review_report.yaml"),
+        help="评审报告输出路径",
+    )
+    p_agent.set_defaults(func=cmd_agent)
+
+    p_tools = sub.add_parser(
+        "tools", help="Day 13：Tool Calling 演示（模型自主决定调哪个工具）"
+    )
+    p_tools.add_argument(
+        "instruction",
+        help="交给 Agent 的自然语言指令，例如 \"帮我把登录功能的测试用例生成并保存\"",
+    )
+    p_tools.add_argument("--max-iterations", type=int, default=5, help="工具循环最多几轮")
+    p_tools.set_defaults(func=cmd_tools)
+
     return parser
 
 
 def main() -> int:
+    """统一入口。
+
+    这里做**顶层异常兜底**，是刻意的设计：
+        每个子命令内部只管自己的正常流程，
+        "出错了要给用户看什么"这件事在这一处统一处理。
+    否则每个命令都要写一遍 try/except，而且总有一天会漏一个 ——
+    漏掉的那个就是用户看到一整屏红色堆栈的时候。
+    """
     _fix_windows_console_encoding()
     settings.ensure_dirs()
 
     args = build_parser().parse_args()
-    return args.func(args)
+
+    try:
+        return args.func(args)
+    except AgentError as exc:
+        # 本项目自己的业务异常：都带 user_message，告诉用户下一步怎么办
+        logger.error("命令执行失败：%s", exc, exc_info=True)
+        print(f"\n[ERROR] {exc}")
+        print(f"[提示] {exc.user_message}")
+        return 1
+    except KeyboardInterrupt:
+        print("\n已取消。")
+        return 130
 
 
 if __name__ == "__main__":

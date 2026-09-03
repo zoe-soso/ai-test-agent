@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 # Literal 表示"只能是这几个值之一"，比 str 更精确，写错了编辑器会提示
 CaseType = Literal["正常", "异常", "边界"]
@@ -65,3 +65,45 @@ class TestSuite(TypedDict):
 
     feature: str            # 功能名，如 "用户登录功能"
     cases: list[TestCase]
+
+
+# ======================================================================
+# Day 12：测试数据的数据契约
+# ======================================================================
+# 为什么测试数据要和测试用例分开？
+#     用例回答"怎么测"（步骤 + 预期），数据回答"用什么测"（具体输入值）。
+#     分开之后：同一条"密码错误"用例，可以套 10 组不同的错误密码反复跑，
+#     用例本身不用改一条 —— 这就是数据驱动测试（DDT）的核心思想。
+#
+#     实际项目里这叫 测试数据与测试逻辑分离，
+#     你的 ecommerce-test-automation 项目里 data/ 目录做的就是这件事。
+#
+# "未分类"是兜底值：模型给的类型不在清单里就记它。
+DataType = Literal[
+    "正确数据", "错误数据", "空值", "超长数据", "特殊字符", "不存在数据", "未分类"
+]
+
+# 真正被认可的数据类型，评测时用它们算覆盖率（不含兜底值）
+DATA_TYPES: tuple[str, ...] = (
+    "正确数据", "错误数据", "空值", "超长数据", "特殊字符", "不存在数据",
+)
+
+
+class TestData(TypedDict):
+    """一组测试数据。"""
+
+    id: str                     # 数据编号，如 TD_LOGIN_001
+    name: str                   # 数据组名称，如 "正确账号密码"
+    data_type: DataType         # 属于哪一类数据
+    fields: dict[str, Any]      # 实际数据，如 {"username": "a@b.com", "password": "123456"}
+    purpose: str                # 这组数据要验证什么
+    expected: NotRequired[str]  # 用这组数据执行后的预期结果
+    link_case: NotRequired[str] # 关联的用例编号（可选，能关联就关联上）
+
+
+class TestDataSuite(TypedDict):
+    """一个功能点的测试数据集合。"""
+
+    feature: str            # 功能名
+    params: list[str]       # 涉及的参数名，如 ["username", "password"]
+    data: list[TestData]

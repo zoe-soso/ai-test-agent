@@ -51,11 +51,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.models import (
+    DATA_TYPES,
     DESIGN_METHODS,
     CaseType,
+    DataType,
     DesignMethod,
     Priority,
     TestCase,
+    TestData,
 )
 from tools.logger import get_logger
 
@@ -352,6 +355,194 @@ def validate_cases(
 
     logger.info(
         "批量校验：共 %d 条，通过 %d 条，丢弃 %d 条",
+        len(raws), len(passed), len(failed),
+    )
+    return passed, all_issues, failed
+
+
+# ----------------------------------------------------------------------
+# Day 12：测试数据校验
+# ----------------------------------------------------------------------
+# 测试数据的校验比用例**宽松**，这是刻意的：
+#
+#   用例里 expected 缺失 = 致命（没法断言，这条废了）
+#   数据里 expected 缺失 = 只是少个说明，数据本身照样能用
+#
+# 所以对测试数据，只有"连值都没有"（fields 缺失或为空）才判致命。
+# 其他一律降级 + 记录，不丢弃 —— 因为数据生成的成本更高，
+# 而且少一组数据往往意味着少覆盖一种场景。
+DATA_TYPE_ALIASES: dict[str, DataType] = {
+    # 正确数据
+    "正确数据": "正确数据", "正确": "正确数据", "正常数据": "正确数据",
+    "正常": "正确数据", "有效数据": "正确数据", "有效": "正确数据",
+    "合法": "正确数据", "positive": "正确数据", "valid": "正确数据",
+    # 错误数据
+    "错误数据": "错误数据", "错误": "错误数据", "错误密码": "错误数据",
+    "错误值": "错误数据", "无效数据": "错误数据", "无效": "错误数据",
+    "negative": "错误数据", "invalid": "错误数据", "wrong": "错误数据",
+    # 空值
+    "空值": "空值", "空": "空值", "空密码": "空值", "空数据": "空值",
+    "留空": "空值", "为空": "空值", "empty": "空值", "null": "空值", "none": "空值",
+    # 超长数据
+    "超长数据": "超长数据", "超长": "超长数据", "超长密码": "超长数据",
+    "超长值": "超长数据", "过长": "超长数据", "long": "超长数据", "overflow": "超长数据",
+    # 特殊字符
+    "特殊字符": "特殊字符", "特殊字符数据": "特殊字符", "特殊符号": "特殊字符",
+    "特殊": "特殊字符", "注入": "特殊字符", "sql注入": "特殊字符",
+    "special": "特殊字符", "injection": "特殊字符",
+    # 不存在数据
+    "不存在数据": "不存在数据", "不存在": "不存在数据", "不存在账号": "不存在数据",
+    "未注册": "不存在数据", "未注册账号": "不存在数据", "nonexistent": "不存在数据",
+}
+
+
+def _norm_data_type(value: Any, issue: CaseIssue) -> DataType:
+    """把 data_type 规范成契约里的六种之一。
+
+    认不出来记为"未分类"，**不因此丢弃这组数据** ——
+    数据类型的归类只是方便统计覆盖率，数据本身仍然可用。
+    """
+    if not isinstance(value, str) or not value.strip():
+        issue.warnings.append("data_type 缺失，记为未分类")
+        return "未分类"
+
+    raw = value.strip()
+    if raw in DATA_TYPES:
+        return raw  # type: ignore[return-value]
+
+    hit = DATA_TYPE_ALIASES.get(raw) or DATA_TYPE_ALIASES.get(raw.lower())
+    if hit:
+        issue.warnings.append(f"data_type「{raw}」已映射为「{hit}」")
+        return hit
+
+    issue.warnings.append(f"data_type「{raw}」无法识别，记为未分类")
+    return "未分类"
+
+
+def _norm_fields(value: Any, expected_params: list[str] | None, issue: CaseIssue) -> dict[str, Any]:
+    """校验 fields：必须是非空字典。
+
+    参数名对不上只记 warning —— 模型可能用了更贴切的字段名
+    （比如把 username 写成 email），数据本身仍然有效，不该因此丢弃。
+    """
+    if not isinstance(value, dict):
+        issue.errors.append(f"fields 类型错误：{type(value).__name__}（应为对象）")
+        return {}
+
+    fields = {str(k): v for k, v in value.items() if str(k).strip()}
+    if not fields:
+        issue.errors.append("fields 为空（没有实际数据就没法执行）")
+        return {}
+
+    if expected_params:
+        missing = [p for p in expected_params if p not in fields]
+        extra = [k for k in fields if k not in expected_params]
+        if missing:
+            issue.warnings.append(f"缺少参数：{'、'.join(missing)}")
+        if extra:
+            issue.warnings.append(f"多余参数：{'、'.join(extra)}")
+
+    return fields
+
+
+def validate_data_item(
+    raw: dict[str, Any],
+    index: int = 0,
+    params: list[str] | None = None,
+    feature_key: str = "AUTO",
+) -> tuple[TestData | None, CaseIssue]:
+    """校验并规范化一组测试数据。
+
+    返回 (规范化后的 TestData, 校验详情)，不合规时第一条为 None。
+    """
+    issue = CaseIssue(index=index, case_id=str(raw.get("id", f"<无id#{index}>")))
+
+    # ---- id ----
+    data_id = str(raw.get("id") or "").strip()
+    if not data_id:
+        data_id = f"TD_{feature_key.upper()}_{index + 1:03d}"
+        issue.warnings.append(f"id 缺失，已自动生成 {data_id}")
+    issue.case_id = data_id
+
+    # ---- name ----
+    name = str(raw.get("name") or "").strip()
+    if not name:
+        # 数据没名字不算致命，用 data_type 凑一个，人还能看懂
+        name = f"数据组{index + 1:02d}"
+        issue.warnings.append("name 缺失，已用序号代替")
+
+    # ---- fields（唯一的致命项）----
+    fields = _norm_fields(raw.get("fields"), params, issue)
+
+    # ---- data_type（元数据，降级不丢弃）----
+    data_type = _norm_data_type(raw.get("data_type"), issue)
+
+    # ---- purpose / expected（可选）----
+    purpose = str(raw.get("purpose") or "").strip()
+    if not purpose:
+        purpose = f"验证{data_type}场景"
+        issue.warnings.append("purpose 缺失，已按数据类型推断")
+
+    if issue.errors:
+        logger.warning("测试数据校验未通过 -> %s", issue)
+        return None, issue
+
+    item: TestData = {
+        "id": data_id,
+        "name": name,
+        "data_type": data_type,
+        "fields": fields,
+        "purpose": purpose,
+    }
+
+    expected = str(raw.get("expected") or "").strip()
+    if expected:
+        item["expected"] = expected
+
+    link_case = str(raw.get("link_case") or "").strip()
+    if link_case:
+        item["link_case"] = link_case
+
+    return item, issue
+
+
+def validate_data(
+    raws: list[dict[str, Any]],
+    params: list[str] | None = None,
+    feature_key: str = "AUTO",
+) -> tuple[list[TestData], list[CaseIssue], list[CaseIssue]]:
+    """批量校验测试数据，返回 (合格数据, 全部详情, 未通过详情)。"""
+    passed: list[TestData] = []
+    all_issues: list[CaseIssue] = []
+    failed: list[CaseIssue] = []
+    seen: dict[str, int] = {}
+
+    for index, raw in enumerate(raws):
+        if not isinstance(raw, dict):
+            issue = CaseIssue(index=index, case_id=f"<非对象#{index}>",
+                              errors=[f"数据类型错误：{type(raw).__name__}"])
+            all_issues.append(issue)
+            failed.append(issue)
+            continue
+
+        item, issue = validate_data_item(raw, index=index, params=params,
+                                         feature_key=feature_key)
+        if item is not None:
+            if item["id"] in seen:
+                seen[item["id"]] += 1
+                new_id = f"{item['id']}_DUP{seen[item['id']]}"
+                issue.warnings.append(f"id 重复，已重命名为 {new_id}")
+                item["id"] = new_id
+            else:
+                seen[item["id"]] = 1
+            passed.append(item)
+
+        all_issues.append(issue)
+        if not issue.ok:
+            failed.append(issue)
+
+    logger.info(
+        "测试数据校验：共 %d 组，通过 %d 组，丢弃 %d 组",
         len(raws), len(passed), len(failed),
     )
     return passed, all_issues, failed

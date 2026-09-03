@@ -135,12 +135,16 @@ def test_logger_writes_file():
 
 
 # ---------------- Day 5：LLM 客户端 ----------------
-def test_mock_mode_is_default_without_key():
+def test_mock_mode_is_default_without_key(monkeypatch):
+    # 隔离真实环境：把全局的 API Key 临时清空，模拟"用户还没配 Key"的场景。
+    # 否则现在 .env 里已经有真实 Key，auto 模式会判成真实调用，断言就反了。
+    monkeypatch.setattr(settings, "LLM_API_KEY", None)
     client = llm_client.LLMClient(api_key=None, mock_mode="auto")
     assert client.is_mock is True
 
 
-def test_mock_mode_can_be_forced_off():
+def test_mock_mode_can_be_forced_off(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_API_KEY", None)
     client = llm_client.LLMClient(api_key=None, mock_mode="false")
     assert client.is_mock is False
 

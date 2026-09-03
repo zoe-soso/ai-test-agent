@@ -24,6 +24,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from agent.tool_calling import AssistantMessage, ToolCall
+
 # 轮换顺序：clean → fenced → chatty → broken → clean ...
 STYLES: tuple[str, ...] = ("clean", "fenced", "chatty", "broken")
 
@@ -45,6 +47,10 @@ class MockLLM:
         """
         self.style = style
         self._call_count = 0
+        # 工具调用剧本走到第几步了（Day 13）。
+        # 它是实例状态而不是局部变量，因为一次对话要跨好几轮循环，
+        # 每一轮都是新的方法调用，得靠它记住"我上一轮已经调过什么了"。
+        self._tool_step = 0
 
     # ------------------------------------------------------------------
     def respond(self, prompt: str, system: str = "", hint: str | None = None) -> str:
@@ -56,6 +62,18 @@ class MockLLM:
             调用方最清楚自己用的是哪个模板，让它直接说。
         """
         full = system + "\n" + prompt
+
+        # Day 11：评审请求要返回"评审结论"结构，不是用例列表。
+        # 如果这里不做区分，mock 会返回 {"cases": [...]}，
+        # review_by_llm 解析后取不到 overall/issues，评审链路在离线模式下
+        # 就永远不会真正跑到 —— 等于这段容错代码没被测过。
+        if hint == "review":
+            return self._review_response(self._next_style())
+
+        # Day 12：测试数据的结构（params + data）和用例（cases）不同，
+        # 同样必须区分，否则离线时数据链路取不到 fields，会被判成全部不合格。
+        if hint == "testdata":
+            return self._testdata_response(self._next_style())
 
         if hint == "json" or any(m in full for m in JSON_MARKERS):
             return self._json_response(self._next_style())
@@ -74,6 +92,61 @@ class MockLLM:
         style = STYLES[self._call_count % len(STYLES)]
         self._call_count += 1
         return style
+
+    # ------------------------------------------------------------------
+    # Day 13：工具调用
+    # ------------------------------------------------------------------
+    def respond_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        fault: bool = False,
+    ) -> AssistantMessage:
+        """离线模拟"模型决定调用工具"这一步。
+
+        为什么 Mock 也要支持工具调用？
+            理由和上面一模一样：**没被离线跑过的代码等于没测过**。
+            `run_tool_loop` 里的"追加 assistant 消息 → 执行 → 回传结果"
+            这段逻辑，如果只有真实调用才走到，
+            那没 Key 的人（以及 CI）就永远验证不了它。
+
+        它按剧本走：看用户最后一句话里有什么词，决定调哪个工具，
+        调完一次之后就不再调，改成给最终答复。
+
+        fault=True 时会**故意**先调一个不存在的工具。
+        这不是捣乱，是为了验证：工具报错被当成结果回传给模型之后，
+        模型能不能自己纠正过来。真实模型确实经常传错工具名或参数，
+        这条纠错路径如果不提前测过，上线就是事故。
+        """
+        self._tool_step += 1
+        user_text = _last_user_text(messages)
+
+        # 第 1 轮：先来一次错误调用（仅在 fault 模式），看程序能不能扛住
+        if fault and self._tool_step == 1:
+            return AssistantMessage(
+                content="我先把旧的用例文件删掉，免得混淆。",
+                tool_calls=[ToolCall(
+                    id=f"call_{self._tool_step}",
+                    name="delete_file",
+                    arguments={"path": "outputs/testcases.yaml"},
+                )],
+            )
+
+        plan = _tool_plan(user_text, fault=fault)
+        step_index = self._tool_step - (2 if fault else 1)
+
+        if step_index < len(plan["calls"]):
+            name, arguments = plan["calls"][step_index]
+            return AssistantMessage(
+                content=plan["say"][step_index] if step_index < len(plan["say"]) else None,
+                tool_calls=[ToolCall(
+                    id=f"call_{self._tool_step}",
+                    name=name,
+                    arguments=arguments,
+                )],
+            )
+
+        return AssistantMessage(content=plan["final"])
 
     # ------------------------------------------------------------------
     # 各种回答
@@ -102,6 +175,63 @@ class MockLLM:
             "好的，这是结果：\n"
             "```json\n"
             + raw.replace('"expected":', '"expectd":', 1)  # 字段名拼错，校验会挂
+            + "\n```"
+        )
+
+    def _review_response(self, style: str) -> str:
+        """Day 11：返回"评审结论"JSON（结构和用例列表完全不同）。
+
+        内容刻意设计成**会触发修改**的形态：
+        包含 1 个错误级 + 2 个警告级问题、2 个遗漏场景。
+        这样 `review_and_revise` 的"修改"分支在离线模式下也能真正跑到，
+        否则那段代码永远只在真实调用时才被执行 —— 太晚了。
+        """
+        raw = json.dumps(_review_data(), ensure_ascii=False, indent=2)
+
+        if style == "clean":
+            return raw
+
+        if style == "fenced":
+            return f"```json\n{raw}\n```"
+
+        if style == "chatty":
+            return (
+                "好的，我评审完了，结论如下：\n\n"
+                f"```json\n{raw}\n```\n\n"
+                "如果你需要我直接把用例改好，可以再告诉我一声。"
+            )
+
+        # broken：把 issues 里的字段名拼错，模拟"看着像 JSON 但字段不对"
+        return (
+            "好的，这是评审结果：\n"
+            "```json\n"
+            + raw.replace('"problem":', '"problm":', 1)
+            + "\n```"
+        )
+
+    def _testdata_response(self, style: str) -> str:
+        """Day 12：返回测试数据 JSON（结构是 params + data，不是 cases）。"""
+        payload = _testdata_data(break_it=(style == "broken"))
+        raw = json.dumps(payload, ensure_ascii=False, indent=2)
+
+        if style == "clean":
+            return raw
+
+        if style == "fenced":
+            return f"```json\n{raw}\n```"
+
+        if style == "chatty":
+            return (
+                "好的，这是为登录功能设计的测试数据：\n\n"
+                f"```json\n{raw}\n```\n\n"
+                "如果需要补充更多边界数据，随时告诉我。"
+            )
+
+        # broken：把第一组的 fields 字段名拼错，校验会挂
+        return (
+            "好的，数据如下：\n"
+            "```json\n"
+            + raw.replace('"fields":', '"fieldz":', 1)
             + "\n```"
         )
 
@@ -169,6 +299,99 @@ class MockLLM:
             "7. TC_LOGIN_007 密码 500 位（P2）→ 有长度校验，页面不报错\n"
             "8. TC_LOGIN_008 邮箱含特殊字符（P3）→ 提示格式错误\n"
         )
+
+
+# ----------------------------------------------------------------------
+# 工具调用剧本（Day 13）
+# ----------------------------------------------------------------------
+def _last_user_text(messages: list[dict[str, Any]]) -> str:
+    """取对话里最后一句用户说的话。"""
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            return str(message.get("content") or "")
+    return ""
+
+
+def _tool_plan(user_text: str) -> dict[str, Any]:
+    """根据用户说了什么，决定该调哪些工具。
+
+    关键词判断很粗糙，但够用 —— Mock 的目的是**走通链路**，
+    不是真的理解语义。真要理解语义，那活儿归模型。
+    """
+    text = user_text.lower()
+
+    if any(word in text for word in ("失败", "分析", "报错", "为什么", "挂了")):
+        return {
+            "calls": [
+                ("run_pytest", {"target": "tests", "timeout": 300}),
+                ("analyze_failure", {
+                    "log_text": (
+                        "FAILED tests/test_x.py::test_login - AssertionError: "
+                        "assert 'Logged in as' in 'Your email or password is incorrect!'\n"
+                        "E   AssertionError: 断言失败\n"
+                        "1 failed, 42 passed in 3.21s"
+                    )
+                }),
+            ],
+            "say": [
+                "我先跑一遍测试，看看现在的实际情况。",
+                "有 1 条失败了，我来分析一下原因。",
+            ],
+            "final": (
+                "跑完了：42 条通过，1 条失败。\n"
+                "失败的是 test_login，类型是**断言失败** —— "
+                "实际返回了「邮箱或密码错误」的提示，说明登录根本没成功。\n"
+                "建议：先核对这条用例的预期结果和当前测试数据是否还匹配，"
+                "确认无误再提缺陷单。"
+            ),
+        }
+
+    if any(word in text for word in ("跑", "执行", "pytest", "回归")):
+        return {
+            "calls": [("run_pytest", {"target": "tests", "timeout": 300})],
+            "say": ["好的，我来执行一遍测试。"],
+            "final": "测试已执行完毕，结果如上。全部用例的通过/失败情况都列出来了。",
+        }
+
+    if any(word in text for word in ("读", "看", "有哪些", "列出", "目录", "文件")):
+        return {
+            "calls": [
+                ("list_files", {"directory": "outputs", "pattern": "*.yaml"}),
+                ("read_file", {"path": "outputs/testcases.yaml"}),
+            ],
+            "say": [
+                "我先看看 outputs 目录下有哪些文件。",
+                "我读一下用例文件的内容。",
+            ],
+            "final": (
+                "outputs 目录里的 YAML 文件已经列出来了，"
+                "用例文件的内容也读到了。需要我对这些用例做什么处理，"
+                "比如评审质量或者补充边界场景吗？"
+            ),
+        }
+
+    # 默认剧本：生成用例 -> 保存
+    # 这是最能体现 Agent 价值的一条链：
+    # 模型不是"说出"该怎么做，而是真的把用例生成出来并存成了文件。
+    return {
+        "calls": [
+            ("generate_testcase", {
+                "feature": "用户登录功能",
+                "description": "邮箱+密码登录，支持记住我",
+            }),
+            ("save_yaml", {"filename": "testcases.yaml"}),
+        ],
+        "say": [
+            "好的，我先为登录功能生成测试用例。",
+            "用例生成好了，我把它保存到文件里。",
+        ],
+        "final": (
+            "已经完成了：为「用户登录功能」生成了测试用例并保存到 "
+            "outputs/testcases.yaml。\n\n"
+            "说明：当前是 **Mock 离线模式**，用例内容来自本地预置数据，"
+            "没有真的调用大模型。配置好 API Key 后同样的命令会走真实生成。"
+        ),
+    }
 
 
 # ----------------------------------------------------------------------
@@ -283,3 +506,145 @@ def _json_cases(break_it: bool = False) -> list[dict[str, Any]]:
             case["design_method"] = methods[index]
 
     return cases
+
+
+def _review_data() -> dict[str, Any]:
+    """构造一份"评审结论"数据（Day 11）。
+
+    字段名必须和 prompts/review.txt 里要求的输出 schema 严格一致：
+        overall / missing_scenarios / issues[{case_id, category, problem,
+                                             suggestion, severity}]
+
+    评审结果**同样**是模型的输出，同样可能不合规 ——
+    这一点很容易被忽略：大家只记得给"生成用例"加容错，
+    忘了"评审""修改"这些环节的返回也需要同样的防御。
+    """
+    return {
+        "overall": "整体可用，但异常场景覆盖不足，且有一条用例的预期结果过于含糊。",
+        "missing_scenarios": [
+            "连续多次登录失败后账号被锁定",
+            "密码前后含空格时的处理",
+        ],
+        "issues": [
+            {
+                "case_id": "TC_LOGIN_006",
+                "category": "预期可验证性",
+                "problem": "预期结果「登录失败，提示明确」不够具体，执行时无法判断通过与否",
+                "suggestion": "改成可验证的描述，如「提示密码长度至少 6 位」",
+                "severity": "警告",
+            },
+            {
+                "case_id": "TC_LOGIN_008",
+                "category": "步骤合理性",
+                "problem": "步骤里没有输入密码就直接点击登录按钮，缺少必要操作",
+                "suggestion": "补上「输入密码」这一步",
+                "severity": "错误",
+            },
+            {
+                "case_id": "-",
+                "category": "异常遗漏",
+                "problem": "未覆盖连续登录失败导致账号锁定的场景",
+                "suggestion": "新增一条异常用例覆盖账号锁定",
+                "severity": "警告",
+            },
+        ],
+    }
+
+
+def _testdata_data(break_it: bool = False) -> dict[str, Any]:
+    """构造登录功能的测试数据（Day 12）。
+
+    六类数据全部覆盖，且刻意包含**真实**的内容：
+        - 500 字符的超长密码（用紧凑标记 <<LONG:500:A>> 表示，
+          由程序展开 —— 模型逐字输出长串既贵又不可靠，见 testdata_generator）
+        - 真的 SQL 注入 / XSS 片段
+
+    这样离线时"标记展开""占位符检测""超长长度检测"这几条规则都有东西可查 ——
+    否则 mock 一直返回完美数据，那些检测代码等于从没跑过。
+    """
+
+
+    data: list[dict[str, Any]] = [
+        {
+            "id": "TD_LOGIN_001",
+            "name": "已注册账号的正确凭证",
+            "data_type": "正确数据",
+            "fields": {"username": "testuser@example.com", "password": "Test@123456"},
+            "purpose": "验证正常登录流程",
+            "expected": "登录成功，页面显示 Logged in as testuser",
+        },
+        {
+            "id": "TD_LOGIN_002",
+            "name": "密码错误",
+            "data_type": "错误数据",
+            "fields": {"username": "testuser@example.com", "password": "WrongPass999"},
+            "purpose": "验证密码校验逻辑",
+            "expected": "登录失败，提示邮箱或密码错误",
+        },
+        {
+            "id": "TD_LOGIN_003",
+            "name": "密码留空",
+            "data_type": "空值",
+            "fields": {"username": "testuser@example.com", "password": ""},
+            "purpose": "验证必填项校验",
+            "expected": "无法提交或提示密码必填",
+        },
+        {
+            "id": "TD_LOGIN_004",
+            "name": "500 位超长密码",
+            "data_type": "超长数据",
+            "fields": {"username": "testuser@example.com", "password": "<<LONG:500:A>>"},
+            "purpose": "验证超长输入不导致系统异常",
+            "expected": "存在长度校验，页面不崩溃、无 500 错误",
+        },
+        {
+            "id": "TD_LOGIN_005",
+            "name": "SQL 注入片段",
+            "data_type": "特殊字符",
+            "fields": {"username": "' OR '1'='1", "password": "anything"},
+            "purpose": "验证 SQL 注入防护",
+            "expected": "登录失败，不发生注入，无数据库报错",
+        },
+        {
+            "id": "TD_LOGIN_006",
+            "name": "密码含 XSS 片段",
+            "data_type": "特殊字符",
+            "fields": {
+                "username": "testuser@example.com",
+                "password": "<script>alert(1)</script>",
+            },
+            "purpose": "验证 XSS 防护",
+            "expected": "脚本不被执行，原样处理或提示格式错误",
+        },
+        {
+            "id": "TD_LOGIN_007",
+            "name": "未注册的账号",
+            "data_type": "不存在数据",
+            "fields": {
+                "username": "notexist_9527@example.com",
+                "password": "Test@123456",
+            },
+            "purpose": "验证不存在的账号无法登录",
+            "expected": "登录失败，提示邮箱或密码错误",
+        },
+    ]
+
+    if break_it:
+        # 掺两条脏数据，用来验证测试数据校验器：
+        #   一条是描述性占位符（能通过结构校验，但质量检查要能揪出来）
+        #   一条缺 fields（结构校验就该拦下）
+        data.append({
+            "id": "TD_LOGIN_008",
+            "name": "占位符数据",
+            "data_type": "正确数据",
+            "fields": {"username": "正确的用户名", "password": "正确的密码"},
+            "purpose": "用于验证占位符检测",
+        })
+        data.append({
+            "id": "TD_LOGIN_009",
+            "name": "缺少 fields",
+            "data_type": "空值",
+            "purpose": "用于验证 fields 缺失会被丢弃",
+        })
+
+    return {"params": ["username", "password"], "data": data}
