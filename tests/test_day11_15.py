@@ -233,12 +233,18 @@ def test_run_tool_loop_executes_then_finishes():
     assert result.steps[0].result == "5"
 
 
-def test_chat_with_tools_mock_returns_no_tools():
-    # Mock 模式下不应真实调用，也不应报错，返回一条没有工具调用的消息
+def test_chat_with_tools_mock_runs_offline():
+    # Mock 模式下不应真实调用，也不应报错；
+    # 现在 Mock 会按"关键词剧本"返回工具调用（这样 Day 13/26 的
+    # 工具循环在离线时也能真正跑通）。这里验证它返回的是合法的
+    # AssistantMessage，且对"生成用例"类指令会给出工具调用。
     client = llm_client.LLMClient(api_key=None, mock_mode="true")
-    msg = client.chat_with_tools([], [])
+    msg = client.chat_with_tools(
+        [{"role": "user", "content": "帮我把登录功能的测试用例生成并保存"}], []
+    )
     assert isinstance(msg, tool_calling.AssistantMessage)
-    assert msg.tool_calls == []
+    assert msg.wants_tools is True
+    assert any(call.name == "generate_testcase" for call in msg.tool_calls)
 
 
 # =====================================================================

@@ -25,6 +25,7 @@ AI 生成的测试代码放在**我们自己的** generated_tests/ 目录
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -74,3 +75,54 @@ else:
     def ensure_test_account():  # type: ignore[no-redef]
         """兜底版：不做任何账号预建，只打个日志。"""
         yield
+
+
+# ------------------------------------------------------------------
+# Day 22：失败截图
+# ------------------------------------------------------------------
+# 失败截图要写到**本项目**自己的 outputs/screenshots/ 目录，
+# 不能写到对方项目里（守住"不改动对方任何文件"的约定）。
+#
+# 这里故意不用 `from config import settings`：
+# 因为生成的测试是在"对方项目的 pytest 子进程"里跑的，
+# 那个子进程的 sys.path 里只有对方项目根，import 不到我们的 config。
+# 所以用相对路径直接算出来最稳：
+#   generated_tests/conftest.py -> parent.parent = 项目根 ai-test-agent/
+SCREENSHOT_DIR = Path(__file__).resolve().parent.parent / "outputs" / "screenshots"
+
+
+def _safe_name(nodeid: str) -> str:
+    """把 pytest 的 nodeid 变成文件名安全的字符串。
+
+    例如：
+        tests/test_login.py::test_x  ->  tests_test_login.py__test_x
+    """
+    name = nodeid.replace("::", "__").replace("/", "_")
+    return re.sub(r"[^\w.\-]", "_", name)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """用例失败时自动截图（Day 22）。
+
+    这是 pytest 的"钩子"（hook）：pytest 每跑完一个用例都会调它。
+    hookwrapper 的意思是"在 pytest 自己处理前后插一脚"，
+    我们这里只需要在"调用（call）阶段失败"时额外截一张图，
+    完全不影响 pytest 的正常流程。
+
+    为什么写到 nodeid 命名的文件？
+        因为后面 failure_collector 要按 nodeid 把"失败信息"和"截图"
+        对应起来。命名一致，才能对得上号。
+    """
+    outcome = yield
+    report = outcome.get_result()
+    # 只在"执行阶段(call)"失败时才截图；setup/teardown 失败不算业务失败
+    if report.when == "call" and report.failed:
+        page = item.funcargs.get("page")
+        if page is not None:
+            try:
+                SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+                path = SCREENSHOT_DIR / f"{_safe_name(item.nodeid)}.png"
+                page.screenshot(path=str(path))
+            except Exception:  # noqa: BLE001 - 截图只是辅助，失败不影响主流程
+                pass

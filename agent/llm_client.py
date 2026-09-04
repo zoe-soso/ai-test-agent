@@ -449,11 +449,12 @@ class LLMClient:
         from agent.tool_calling import AssistantMessage, ToolCall
 
         if self.is_mock:
-            logger.warning("当前为 Mock 模式，chat_with_tools 返回一段说明文本（不含工具调用）")
-            return AssistantMessage(
-                content="（离线模式：未真实调用工具，直接返回说明文本）",
-                tool_calls=[],
-            )
+            # 离线也要能跑通"模型要工具 → 我们执行 → 回传结果"的循环，
+            # 否则 Day 13/26 的 Tool Calling 逻辑在没 Key 时永远验证不到。
+            # MockLLM 内置了"按关键词决定调哪个工具"的剧本
+            # （generate_testcase / rerun_test / analyze_failure ...），
+            # 这里直接交给它，和真实路径走同一条 run_tool_loop。
+            return self._mock_engine.respond_with_tools(messages, tools)
 
         last_error: Exception | None = None
         for attempt in range(1, retries + 1):

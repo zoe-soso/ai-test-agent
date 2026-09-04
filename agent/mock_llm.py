@@ -75,6 +75,11 @@ class MockLLM:
         if hint == "testdata":
             return self._testdata_response(self._next_style())
 
+        # Day 24~25：缺陷分析的结构（问题类型/原因/分类/严重程度），
+        # 必须单独返回，否则离线时分析链路取不到 category/severity。
+        if hint == "analyze":
+            return self._analyze_response()
+
         if hint == "json" or any(m in full for m in JSON_MARKERS):
             return self._json_response(self._next_style())
 
@@ -209,6 +214,30 @@ class MockLLM:
             + "\n```"
         )
 
+    def _analyze_response(self) -> str:
+        """Day 24~25：返回"缺陷分析"JSON（含分类 + 严重程度）。
+
+        内容刻意设计成"能触发分类"的形态：元素定位问题 + P1，
+        这样 defect_analyzer 的"校验分类/严重程度"逻辑在离线时也能跑到。
+        """
+        data = {
+            "problem_summary": "登录按钮点击后页面未跳转，断言失败",
+            "category": "元素定位问题",
+            "severity": "P1",
+            "possible_causes": [
+                "登录按钮的 locator 失效，页面改版后选择器变了",
+                "点击后页面有loading，断言执行得太早（等待不足）",
+                "测试数据里的账号其实未注册，登录被后端拒绝",
+            ],
+            "suggestions": [
+                "用稳定的定位方式（text/role）替换脆弱的 CSS 选择器",
+                "点击后显式等待跳转结果（wait_for_url 或可见元素），而非 sleep",
+                "核对测试账号是否真实存在",
+            ],
+        }
+        raw = json.dumps(data, ensure_ascii=False, indent=2)
+        return raw
+
     def _testdata_response(self, style: str) -> str:
         """Day 12：返回测试数据 JSON（结构是 params + data，不是 cases）。"""
         payload = _testdata_data(break_it=(style == "broken"))
@@ -312,7 +341,7 @@ def _last_user_text(messages: list[dict[str, Any]]) -> str:
     return ""
 
 
-def _tool_plan(user_text: str) -> dict[str, Any]:
+def _tool_plan(user_text: str, fault: bool = False) -> dict[str, Any]:
     """根据用户说了什么，决定该调哪些工具。
 
     关键词判断很粗糙，但够用 —— Mock 的目的是**走通链路**，
@@ -321,28 +350,40 @@ def _tool_plan(user_text: str) -> dict[str, Any]:
     text = user_text.lower()
 
     if any(word in text for word in ("失败", "分析", "报错", "为什么", "挂了")):
+        # Day 26 缺陷分析 Agent 的剧本：先决定"重跑一次排除偶发"，
+        # 再分析失败原因，最后产出报告。完整演示"观察→决策→调用工具"。
         return {
             "calls": [
-                ("run_pytest", {"target": "tests", "timeout": 300}),
+                ("rerun_test", {"target": "tests", "timeout": 300}),
                 ("analyze_failure", {
-                    "log_text": (
-                        "FAILED tests/test_x.py::test_login - AssertionError: "
-                        "assert 'Logged in as' in 'Your email or password is incorrect!'\n"
-                        "E   AssertionError: 断言失败\n"
-                        "1 failed, 42 passed in 3.21s"
+                    "failure_json": (
+                        '{"test_name": "tests/test_x.py::test_login", '
+                        '"error": "AssertionError: 登录后未跳转", '
+                        '"traceback": "E AssertionError: assert \'Logged in as\' '
+                        "in 'Your email or password is incorrect!'\\n"
+                        '1 failed, 42 passed in 3.21s"}'
+                    )
+                }),
+                ("finalize_report", {
+                    "summary": (
+                        "共 43 条用例，1 条失败（test_login）。\n"
+                        "重跑一次仍失败，排除偶发。\n"
+                        "分析结论：元素定位问题(P1)，疑似登录按钮 locator 失效或等待不足。"
                     )
                 }),
             ],
             "say": [
-                "我先跑一遍测试，看看现在的实际情况。",
-                "有 1 条失败了，我来分析一下原因。",
+                "失败看起来不稳定，我先重跑一次排除偶发问题。",
+                "重跑仍失败，我来分析具体原因。",
+                "原因已定位，我把结论整理成缺陷报告。",
             ],
             "final": (
-                "跑完了：42 条通过，1 条失败。\n"
-                "失败的是 test_login，类型是**断言失败** —— "
-                "实际返回了「邮箱或密码错误」的提示，说明登录根本没成功。\n"
-                "建议：先核对这条用例的预期结果和当前测试数据是否还匹配，"
-                "确认无误再提缺陷单。"
+                "分析完成：\n"
+                "- 失败用例：test_login\n"
+                "- 分类：元素定位问题（P1）\n"
+                "- 可能原因：登录按钮 locator 失效 / 等待不足 / 测试账号未注册\n"
+                "- 建议：改用稳定定位方式，点击后显式等待跳转，核对测试账号\n"
+                "（详见生成的缺陷报告文件）"
             ),
         }
 

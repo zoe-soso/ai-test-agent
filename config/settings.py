@@ -39,6 +39,14 @@ EVAL_DIR = PROJECT_ROOT / "eval"          # 放评测集与评测结果（Day 7�
 #   需要执行时再用绝对路径把文件交给对方的 pytest 去跑（见 tools/test_runner.py）。
 GENERATED_DIR = PROJECT_ROOT / "generated_tests"
 
+# Day 21~22：测试执行后产生的"证据"放在本项目自己的 outputs/ 下，
+# 而不是写进对方项目（守住"不改动对方任何文件"的约定）。
+#   ALLURE_RESULTS_DIR  Allure 原始结果（JSON），再生成 HTML 报告
+#   SCREENSHOT_DIR      失败用例的截图（PNG），交给 AI 辅助分析
+REPORT_DIR = OUTPUT_DIR / "reports"
+ALLURE_RESULTS_DIR = OUTPUT_DIR / "allure-results"
+SCREENSHOT_DIR = OUTPUT_DIR / "screenshots"
+
 # ------------------------------------------------------------------
 # 2. 加载 .env（敏感信息）
 # ------------------------------------------------------------------
@@ -129,7 +137,8 @@ def ensure_dirs() -> None:
         往不存在的目录写文件会抛 FileNotFoundError。
         在程序启动时统一创建一次，比在每个写文件的地方 try 一遍干净得多。
     """
-    for directory in (DATA_DIR, OUTPUT_DIR, LOG_DIR, PROMPT_DIR, GENERATED_DIR):
+    for directory in (DATA_DIR, OUTPUT_DIR, LOG_DIR, PROMPT_DIR, GENERATED_DIR,
+                      REPORT_DIR, ALLURE_RESULTS_DIR, SCREENSHOT_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
     # 评测目录多两层：eval/cases 放评测集，eval/runs 放每次结果快照

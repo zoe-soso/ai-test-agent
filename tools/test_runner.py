@@ -75,12 +75,19 @@ EXIT_MEANING = {
 _STAT_PATTERN = re.compile(r"(\d+)\s+(passed|failed|error|errors|skipped|xfailed|xpassed)")
 # 抓失败的用例名，例如：
 #   "FAILED tests/test_login.py::test_x - AssertionError: ..."
-_FAILED_LINE = re.compile(r"^FAILED\s+(\S+)(?:\s+-\s+(.*))?$", re.MULTILINE)
+# 注意：用例的 nodeid 里可能含空格（项目路径带空格时，pytest 会打印成
+#   "FAILED ..\基于 LLM 的 Web 智能...\generated_tests\test_x.py::test_y"）。
+# 所以这里用 .+?（非贪婪、可含空格）而不是 \S+，否则空格一出现就截断，
+# 导致失败时拿不到失败用例名（曾因此误报"全部通过"）。
+_FAILED_LINE = re.compile(r"^FAILED\s+(.+?)(?:\s+-\s+(.*))?$", re.MULTILINE)
 
 
 @dataclass
 class TestRunResult:
     """一次 pytest 执行的结构化结果。"""
+
+    # 告诉 pytest：我是数据类，不是测试用例类，别来收集我
+    __test__ = False
 
     command: list[str]
     returncode: int = 0
@@ -135,6 +142,7 @@ def run_pytest(
     timeout: int = 300,
     extra_args: list[str] | None = None,
     python_exe: str | Path | None = None,
+    allure: bool = False,
 ) -> TestRunResult:
     """执行 pytest，返回结构化结果。
 
@@ -145,10 +153,23 @@ def run_pytest(
         timeout     超时秒数
         extra_args  额外的 pytest 参数（谨慎使用，会原样拼进命令）
         python_exe  用哪个解释器；默认用对方项目的 venv python
+        allure      是否产出 Allure 原始结果。注意：结果写在**本项目**的
+                    outputs/allure-results/，而不是对方项目 —— 守住
+                    "不改动对方任何文件"的约定（Day 21）。
     """
     target_path = Path(target) if target else settings.GENERATED_DIR
     if not target_path.is_absolute():
-        target_path = settings.PROJECT_ROOT / target_path
+        # 相对路径到底相对谁？pytest 子进程的 cwd 是**对方项目根**
+        # （见下方 subprocess.run 的 cwd=settings.TEST_PROJECT_DIR）。
+        # 所以 AI 工具（如 rerun_test）给来的相对路径（可能带 ..\）也
+        # 是相对对方项目根的。因此这里对相对路径按对方项目根解析，
+        # 再用 .resolve() 把 ..\ 归一化成干净绝对路径 —— 否则路径会
+        # 和 PROJECT_ROOT 重复拼接、变成"甲\..\甲\..."，pytest 直接
+        # 报"命令行用法错误（exit 4）"。
+        target_path = (settings.TEST_PROJECT_DIR / target_path).resolve()
+    else:
+        # 绝对路径也归一化，去掉可能残留的 ..\（统一成最干净的形式）
+        target_path = target_path.resolve()
 
     interpreter = str(python_exe or settings.TEST_PROJECT_PYTHON)
 
@@ -165,6 +186,11 @@ def run_pytest(
         "--browser", browser,
         "-q", "--no-header",
     ]
+    # Day 21：把 Allure 原始结果写到本项目目录，而不是对方项目。
+    # 对方项目已安装 allure-pytest 插件（已验证），所以加 --alluredir 即可，
+    # 不会报错；结果 JSON 落在我们自己的 outputs/allure-results/。
+    if allure:
+        command.append(f"--alluredir={settings.ALLURE_RESULTS_DIR}")
     if extra_args:
         command.extend(extra_args)
 
@@ -244,3 +270,55 @@ def _parse_output(output: str, result: TestRunResult) -> None:
         if len(reason) > 120:
             reason = reason[:117] + "..."
         result.failed_tests.append(f"{name}  |  {reason}" if reason else name)
+
+
+def generate_allure_report(
+    results_dir: str | Path | None = None,
+    output_dir: str | Path | None = None,
+    *,
+    clean: bool = True,
+    allure_cli: str = "allure",
+) -> tuple[bool, str]:
+    """把 Allure 原始结果生成为可看的 HTML 报告（Day 21）。
+
+    返回 (是否成功, 提示信息)。
+
+    为什么要把"生成报告"单独做成函数？
+        因为 Allure 的 `allure` 命令是 **Java 写的独立程序**，不一定装在
+        每台电脑上。生成失败不该让整个 Agent 崩溃——所以做成"尽力而为"：
+        命令不在就告诉用户怎么装，不报错。
+
+    参数：
+        results_dir   Allure 原始结果目录（默认 outputs/allure-results）
+        output_dir    HTML 报告输出目录（默认 outputs/reports/allure）
+        clean         先清空旧报告，避免叠加
+        allure_cli    allure 命令名；若装在不同路径可覆盖
+    """
+    results = Path(results_dir or settings.ALLURE_RESULTS_DIR)
+    out = Path(output_dir or (settings.REPORT_DIR / "allure"))
+    if not results.exists() or not any(results.iterdir()):
+        return False, f"没有 Allure 原始结果：{results}（请先用 pytest --alluredir 跑一次）"
+
+    out.mkdir(parents=True, exist_ok=True)
+    command = [allure_cli, "generate", str(results), "-o", str(out)]
+    if clean:
+        command.append("--clean")
+
+    try:
+        completed = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=120,
+        )
+    except FileNotFoundError:
+        return False, (
+            "本机没装 Allure 命令行工具（Java 版）。\n"
+            "安装方式：https://allurereport.org/docs/#install  \n"
+            "装好后把 `allure` 加进 PATH，再运行本命令即可生成 HTML 报告。"
+        )
+    except subprocess.TimeoutExpired:
+        return False, "生成 Allure 报告超时（120s）。"
+
+    if completed.returncode != 0:
+        tail = (completed.stderr or completed.stdout or "")[-300:]
+        return False, f"Allure 生成失败：{tail}"
+    return True, f"Allure 报告已生成：{out / 'index.html'}"

@@ -699,6 +699,37 @@ def cmd_code(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def cmd_run(args: argparse.Namespace) -> int:
+    """Day 27：把整条流水线跑一遍（项目核心 Demo）。"""
+    from agent import llm_client
+    from agent.pipeline import run_pipeline
+
+    client = llm_client.get_client()
+
+    print("=" * 60)
+    print("  Day 27 完整流水线：需求 → 用例 → 代码 → 执行 → AI 分析")
+    print("=" * 60)
+    print(f"  功能     : {args.feature}")
+    print(f"  生成条数 : {args.limit}")
+    print(f"  Allure   : {'是' if args.allure else '否'}")
+    print(f"  人工确认 : {'--auto 已跳过' if args.auto else '执行前会让你确认（Human-in-the-loop）'}")
+    print(f"  运行模式 : {'Mock（离线）' if client.is_mock else '真实调用'}")
+    print("=" * 60)
+
+    run_pipeline(
+        client,
+        feature=args.feature,
+        description=args.description,
+        limit=args.limit,
+        auto=args.auto,
+        browser=args.browser,
+        timeout=args.timeout,
+        allure=args.allure,
+        max_repairs=args.max_repairs,
+    )
+    return 0
+
+
 
 # ----------------------------------------------------------------------
 # 命令行组装
@@ -884,6 +915,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="所有确认自动选是（CI 用；本地演示时不建议，会跳过人工确认）",
     )
     p_code.set_defaults(func=cmd_code)
+
+    p_run = sub.add_parser(
+        "run", help="Day 27 核心 Demo：需求→用例→代码→执行→AI 缺陷分析 全链路"
+    )
+    p_run.add_argument("--feature", default="用户登录功能", help="被测功能名")
+    p_run.add_argument("--description", default="（无额外描述）", help="需求描述")
+    p_run.add_argument("--limit", type=int, default=1, help="最多生成几条用例对应的代码（默认 1 条，省钱）")
+    p_run.add_argument("--max-repairs", type=int, default=1, help="生成/修改/代码检查最多自修正几次")
+    p_run.add_argument("--browser", default="chromium", help="只用哪种浏览器跑，默认 chromium")
+    p_run.add_argument("--timeout", type=int, default=300, help="执行超时秒数")
+    p_run.add_argument(
+        "--allure", action="store_true",
+        help="执行时产出 Allure 原始结果（Day 21）；报告生成需另装 allure CLI",
+    )
+    p_run.add_argument(
+        "--auto", action="store_true",
+        help="跳过人工确认直接执行（CI/演示用；平时不建议，违反 Human-in-the-loop）",
+    )
+    p_run.set_defaults(func=cmd_run)
 
     return parser
 
