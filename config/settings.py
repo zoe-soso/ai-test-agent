@@ -31,6 +31,14 @@ LOG_DIR = PROJECT_ROOT / "logs"           # 放日志
 PROMPT_DIR = PROJECT_ROOT / "prompts"     # 放 Prompt 模板
 EVAL_DIR = PROJECT_ROOT / "eval"          # 放评测集与评测结果（Day 7）
 
+# Day 17~18：AI 生成的 Playwright 测试代码放这里。
+#
+# 为什么不直接写进 ecommerce-test-automation 的 tests/ 目录？
+#   那个项目是我们**只读引用**的既有项目，约定是不改动它的任何文件。
+#   把生成的代码放在自己项目里，两个项目依然完全隔离；
+#   需要执行时再用绝对路径把文件交给对方的 pytest 去跑（见 tools/test_runner.py）。
+GENERATED_DIR = PROJECT_ROOT / "generated_tests"
+
 # ------------------------------------------------------------------
 # 2. 加载 .env（敏感信息）
 # ------------------------------------------------------------------
@@ -121,7 +129,7 @@ def ensure_dirs() -> None:
         往不存在的目录写文件会抛 FileNotFoundError。
         在程序启动时统一创建一次，比在每个写文件的地方 try 一遍干净得多。
     """
-    for directory in (DATA_DIR, OUTPUT_DIR, LOG_DIR, PROMPT_DIR):
+    for directory in (DATA_DIR, OUTPUT_DIR, LOG_DIR, PROMPT_DIR, GENERATED_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
     # 评测目录多两层：eval/cases 放评测集，eval/runs 放每次结果快照

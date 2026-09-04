@@ -591,6 +591,114 @@ def cmd_tools(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_cases_for_code(args: argparse.Namespace, client: object) -> tuple[list, str]:
+    """取待转代码的用例（返回 用例列表 + 来源说明）。
+
+    两种来源：
+        1. --input 指定了 YAML —— 用已有的用例（最常用，也最省钱）
+        2. 没指定 —— 先生成一批用例，再转成代码（一条命令演示全链路）
+    """
+    from agent import validator
+    from agent.testcase_generator import TestCaseGenerator
+    from tools import file_io
+
+    if args.input:
+        payload = file_io.read_yaml(args.input)
+        raws = payload.get("cases", []) if isinstance(payload, dict) else payload
+        passed, _, _ = validator.validate_cases(raws, feature_key="AUTO")
+        return passed, f"文件 {args.input}"
+
+    generator = TestCaseGenerator(client=client)  # type: ignore[arg-type]
+    suite, _ = generator.generate(args.feature, args.description)
+    return suite["cases"], "现场生成"
+
+
+def cmd_code(args: argparse.Namespace) -> int:
+    """Day 16~20：测试用例 -> Playwright 代码 -> 人工确认 -> 执行 pytest。"""
+    from agent import llm_client
+    from agent.code_generator import CodeGenerator
+    from tools import test_runner
+    from tools.human import ask_yes_no, confirm_execution
+
+    client = llm_client.get_client()
+
+    print("=" * 58)
+    print("  Day 16~20：测试用例 → Playwright 代码 → 执行")
+    print("=" * 58)
+    print(f"  功能     : {args.feature}")
+    print(f"  生成条数 : {args.limit}")
+    print(f"  执行测试 : {'是（会先让你确认）' if args.run else '否'}")
+    print(f"  运行模式 : {'Mock（离线）' if client.is_mock else '真实调用'}")
+    print("=" * 58)
+
+    # ---- 1. 取用例 ----
+    try:
+        cases, source = _load_cases_for_code(args, client)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("读取用例失败：%s", exc)
+        print(f"\n[ERROR] 读取用例失败：{exc}")
+        return 1
+
+    if not cases:
+        print("\n[ERROR] 没有可用的用例，无法生成代码。")
+        return 1
+
+    print(f"\n[1/4] 待转换用例 {len(cases)} 条（来源：{source}）")
+
+    # ---- 2. 生成代码 ----
+    generator = CodeGenerator(client=client, max_repairs=args.max_repairs)
+    results = generator.generate_many(args.feature, cases, limit=args.limit)
+    print("[2/4] 代码生成完成")
+
+    # ---- 3. 代码检查 + 保存 ----
+    saved: list[str] = []
+    for item in results:
+        print(f"\n  {item.describe()}")
+        for issue in item.issues:
+            print(f"      [!] {issue}")
+        if not item.code:
+            continue
+
+        if args.yes or ask_yes_no(f"      是否保存 {item.filename}？", default=True):
+            path = generator.save(item)
+            saved.append(str(path))
+            print(f"      已保存 -> {path}")
+
+    if not saved:
+        print("\n[3/4] 没有任何代码被保存，结束。")
+        return 1
+    print(f"\n[3/4] 共保存 {len(saved)} 个文件")
+
+    # ---- 4. 人工确认 + 执行（Day 19 + Day 20）----
+    if not args.run:
+        print("\n[4/4] 未加 --run，不执行（这是刻意的：执行前必须人确认）。")
+        print("      想执行请加 --run，会先展示代码让你确认。")
+        return 0
+
+    target = args.target or saved[0]
+    code_text = Path(target).read_text(encoding="utf-8")
+
+    if args.yes:
+        print(f"\n[4/4] --yes 已跳过人工确认，直接执行：{target}")
+    elif not confirm_execution(code_text, target):
+        print("\n[4/4] 你选择了不执行。代码已保存在原处，随时可以手动跑。")
+        return 0
+
+    print(f"\n正在执行：{target}（浏览器 {args.browser}）")
+    result = test_runner.run_pytest(target, browser=args.browser, timeout=args.timeout)
+
+    print("\n【执行结果】")
+    for key, value in result.to_dict().items():
+        print(f"  {key} : {value}")
+
+    if not result.success and result.stdout:
+        print("\n【pytest 输出（最后 25 行）】")
+        for line in result.stdout.strip().splitlines()[-25:]:
+            print(f"  {line}")
+
+    return 0 if result.success else 1
+
+
 
 # ----------------------------------------------------------------------
 # 命令行组装
@@ -749,6 +857,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_tools.add_argument("--max-iterations", type=int, default=5, help="工具循环最多几轮")
     p_tools.set_defaults(func=cmd_tools)
+
+    p_code = sub.add_parser(
+        "code", help="Day 16~20：测试用例 → Playwright 代码 → 人工确认 → 执行"
+    )
+    p_code.add_argument("--feature", default="用户登录功能", help="被测功能名")
+    p_code.add_argument("--description", default="（无额外描述）", help="需求描述")
+    p_code.add_argument(
+        "--input", default="",
+        help="用例 YAML 路径；不填则现场生成一批用例再转代码",
+    )
+    p_code.add_argument("--limit", type=int, default=1, help="转换前几条用例（默认 1 条，省钱）")
+    p_code.add_argument("--max-repairs", type=int, default=1, help="代码检查不合格时最多改几轮")
+    p_code.add_argument(
+        "--run", action="store_true",
+        help="生成后执行测试（执行前会展示代码让你确认）",
+    )
+    p_code.add_argument(
+        "--target", default="",
+        help="要执行的文件；默认执行本次保存的第一个文件",
+    )
+    p_code.add_argument("--browser", default="chromium", help="只用哪种浏览器跑，默认 chromium")
+    p_code.add_argument("--timeout", type=int, default=300, help="执行超时秒数")
+    p_code.add_argument(
+        "--yes", action="store_true",
+        help="所有确认自动选是（CI 用；本地演示时不建议，会跳过人工确认）",
+    )
+    p_code.set_defaults(func=cmd_code)
 
     return parser
 
