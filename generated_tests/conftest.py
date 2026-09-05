@@ -25,14 +25,25 @@ AI 生成的测试代码放在**我们自己的** generated_tests/ 目录
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import sys
 from pathlib import Path
 
 import pytest
 
-# 对方项目根目录（与 config/settings.py 里的 TEST_PROJECT_DIR 一致）
-TEST_PROJECT = Path(r"D:/PythonProjects/ecommerce-test-automation")
+# 目标项目根目录。
+#
+# Day 28 之前：这里**自己硬编码了一份路径**，而 settings.py 里还有一份，
+# 两处真值不同步就会出现"按 A 项目生成代码、却按 B 项目去执行"的诡异 bug。
+#
+# 现在：优先读父进程（tools/test_runner.py）通过环境变量传进来的路径，
+# 保证"生成"和"执行"用的是同一个项目。只有在单独手动跑 pytest、
+# 没人设这个环境变量时，才退回下面的默认值。
+TEST_PROJECT = Path(
+    os.environ.get("AI_AGENT_TARGET_PROJECT")
+    or r"D:/PythonProjects/ecommerce-test-automation"
+)
 
 
 def _load_test_project_conftest():

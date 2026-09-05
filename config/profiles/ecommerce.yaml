@@ -1,0 +1,67 @@
+# 目标项目档案：电商网站自动化测试
+#
+# 这份文件定义了"Agent 要接哪个被测项目、它的页面对象长什么样"。
+# 想接别的项目：复制一份改名，改下面 target 和 pages 两处即可，代码不用动。
+#
+# 用法：
+#   python main.py run --profile ecommerce      # 显式指定
+#   set AI_AGENT_PROFILE=myproject              # 或用环境变量（Windows）
+
+display_name: 电商网站 Web 自动化测试（pytest + Playwright + POM）
+site_url: https://automationexercise.com
+
+# ---- 目标项目在哪、用什么解释器跑 ----
+target:
+  project_dir: D:/PythonProjects/ecommerce-test-automation
+  # 可写相对路径（相对 project_dir），也可写绝对路径
+  python_exe: venv/Scripts/python.exe
+  # 目标项目内部结构（大多数 POM 项目都一样，不一致时在这里改）
+  pages_dir: pages
+  base_page_file: base_page.py
+  conftest_file: conftest.py
+
+# ---- 生成代码时的项目约定 ----
+# 测试函数的第一个固件叫什么（对方 conftest 里提供的浏览器页面固件）
+page_fixture: page_context
+# 怎么拿到站点首页地址（对方项目的配置读取方式）
+config_snippet: 'config["base_url"]'
+# 每个测试开头必须先做的动作
+entry_snippet: login_page.open(config["base_url"])
+
+# ---- 页面对象映射（中文需求 → 代码里的类）----
+# keyword   : 需求文本里出现这个词就匹配到这个页面
+# class/module: 生成代码要 import 的类和模块
+# hint      : 给模型看的方法提示（留空则自动读取真实方法清单）
+# 说明：这一节可以整段删掉，那时会自动扫描 pages/ 目录发现所有 *Page 类。
+pages:
+  - keyword: 登录
+    class: LoginPage
+    module: pages.login_page
+    hint: open_login_page() / login(email, password) / get_login_user() / get_error_message() / is_login_success(username) / logout()
+
+  - keyword: 注册
+    class: LoginPage
+    module: pages.login_page
+    hint: signup(name, email) / fill_account_info(info) / create_account() / is_account_created()
+
+  - keyword: 购物车
+    class: CartPage
+    module: pages.cart_page
+    hint: 打开购物车、添加商品、查看商品数量、删除商品等（以实际类方法为准）
+
+  - keyword: 结算
+    class: CheckoutPage
+    module: pages.checkout_page
+    hint: 填写地址、下单、确认订单等（以实际类方法为准）
+
+  - keyword: 商品
+    class: ProductPage
+    module: pages.product_page
+    hint: 搜索商品、打开详情、加入购物车等（以实际类方法为准）
+
+# ---- 兜底：需求里的关键词一个都没命中时用这个 ----
+fallback_page:
+  keyword: ""
+  class: LoginPage
+  module: pages.login_page
+  hint: login(email, password) / get_login_user()

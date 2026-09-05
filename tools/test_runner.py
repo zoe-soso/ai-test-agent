@@ -57,6 +57,11 @@ from typing import Any
 from config import settings
 from tools.logger import get_logger
 
+# Day 28：执行环节也由"项目档案"驱动，这样接新项目时
+# 生成代码（code_generator）和执行（本模块）用的是同一个档案，
+# 不必再改 settings.TEST_PROJECT_DIR。
+from agent import project_profile
+
 logger = get_logger(__name__)
 
 # pytest 退出码的含义（面试可能会问到，值得背下来）
@@ -143,6 +148,7 @@ def run_pytest(
     extra_args: list[str] | None = None,
     python_exe: str | Path | None = None,
     allure: bool = False,
+    profile: project_profile.ProjectProfile | None = None,
 ) -> TestRunResult:
     """执行 pytest，返回结构化结果。
 
@@ -156,22 +162,34 @@ def run_pytest(
         allure      是否产出 Allure 原始结果。注意：结果写在**本项目**的
                     outputs/allure-results/，而不是对方项目 —— 守住
                     "不改动对方任何文件"的约定（Day 21）。
+        profile     目标项目档案（Day 28）。给的话，pytest 的工作目录、
+                    解释器、PYTHONPATH 全部按档案走，不再写死 settings。
+                    不接新项目时不用传，默认沿用 settings 里的 ecommerce。
     """
+    # Day 28：执行环节的项目根也由档案决定，做到"生成 = 执行"同源。
+    project_dir = profile.project_dir if profile is not None else settings.TEST_PROJECT_DIR
+
     target_path = Path(target) if target else settings.GENERATED_DIR
     if not target_path.is_absolute():
-        # 相对路径到底相对谁？pytest 子进程的 cwd 是**对方项目根**
-        # （见下方 subprocess.run 的 cwd=settings.TEST_PROJECT_DIR）。
+        # 相对路径到底相对谁？pytest 子进程的 cwd 是**目标项目根**
+        # （见下方 subprocess.run 的 cwd=project_dir）。
         # 所以 AI 工具（如 rerun_test）给来的相对路径（可能带 ..\）也
-        # 是相对对方项目根的。因此这里对相对路径按对方项目根解析，
+        # 是相对目标项目根的。因此这里对相对路径按目标项目根解析，
         # 再用 .resolve() 把 ..\ 归一化成干净绝对路径 —— 否则路径会
         # 和 PROJECT_ROOT 重复拼接、变成"甲\..\甲\..."，pytest 直接
         # 报"命令行用法错误（exit 4）"。
-        target_path = (settings.TEST_PROJECT_DIR / target_path).resolve()
+        target_path = (project_dir / target_path).resolve()
     else:
         # 绝对路径也归一化，去掉可能残留的 ..\（统一成最干净的形式）
         target_path = target_path.resolve()
 
-    interpreter = str(python_exe or settings.TEST_PROJECT_PYTHON)
+    # 解释器：显式传 > 档案指定 > settings 默认
+    if python_exe is not None:
+        interpreter = str(python_exe)
+    elif profile is not None:
+        interpreter = str(profile.python_exe)
+    else:
+        interpreter = str(settings.TEST_PROJECT_PYTHON)
 
     command = [
         interpreter,
@@ -194,16 +212,21 @@ def run_pytest(
     if extra_args:
         command.extend(extra_args)
 
-    # 工作目录切到对方项目根，并把它的根目录加进 PYTHONPATH。
+    # 工作目录切到目标项目根，并把它的根目录加进 PYTHONPATH。
     # 这样生成的代码里 `from pages.login_page import LoginPage` 才能 import 成功。
     env = os.environ.copy()
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = (
-        f"{settings.TEST_PROJECT_DIR}{os.pathsep}{existing}" if existing
-        else str(settings.TEST_PROJECT_DIR)
+        f"{project_dir}{os.pathsep}{existing}" if existing
+        else str(project_dir)
     )
+    # Day 28：把"当前接的是哪个目标项目"通过环境变量传给子进程。
+    # 子进程里跑的 generated_tests/conftest.py 需要这个路径去借对方的固件，
+    # 以前它是**自己又硬编码了一份**，两处真值不同步就会出现
+    # "按 A 项目生成代码、却按 B 项目去执行"的诡异问题。现在单一真值来源。
+    env["AI_AGENT_TARGET_PROJECT"] = str(project_dir)
 
-    logger.info("执行 pytest（工作目录：%s）", settings.TEST_PROJECT_DIR)
+    logger.info("执行 pytest（工作目录：%s）", project_dir)
     logger.info("命令：%s", " ".join(command))
 
     result = TestRunResult(command=command)
@@ -211,7 +234,7 @@ def run_pytest(
     try:
         completed = subprocess.run(
             command,
-            cwd=str(settings.TEST_PROJECT_DIR),
+            cwd=str(project_dir),
             env=env,
             capture_output=True,
             text=True,

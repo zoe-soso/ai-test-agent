@@ -1,0 +1,36 @@
+# 目标项目档案【模板】—— 接新项目时复制这个文件
+#
+# 步骤（不用改任何 Python 代码）：
+#   1. 复制本文件，改名为 <你的项目名>.yaml（例如 saas_admin.yaml）
+#   2. 至少填 target.project_dir 和 target.python_exe 两行
+#   3. 跑：python main.py run --profile <你的项目名> --feature "登录功能"
+#
+# 关于 pages 那一节：
+#   - 填了   → 用中文关键词精确匹配页面类（更快、更省 token）
+#   - 不填/删掉 → 自动扫描 pages/ 目录发现所有 *Page 类及其真实方法
+#   建议先删掉跑一次看看自动发现的效果，不够准再补映射。
+
+display_name: 你的项目名称
+site_url: https://your-site.example.com
+
+target:
+  # 必填：被测项目根目录（绝对路径）
+  project_dir: D:/path/to/your-test-project
+  # 必填：用什么解释器跑 pytest（通常就是该项目的 venv）
+  python_exe: venv/Scripts/python.exe
+  # 选填：目标项目内部结构，与默认一致可省略
+  pages_dir: pages
+  base_page_file: base_page.py
+  conftest_file: conftest.py
+
+# 生成代码时的项目约定（按你的项目实际改）
+page_fixture: page_context          # 你的 conftest 里提供的页面固件名
+config_snippet: 'config["base_url"]' # 你的项目怎么拿首页地址
+entry_snippet: your_page.open(config["base_url"])
+
+# 页面对象映射（可整段删除 → 自动发现）
+# pages:
+#   - keyword: 登录
+#     class: LoginPage
+#     module: pages.login_page
+#     hint: 登录相关方法（留空自动读取真实方法清单）

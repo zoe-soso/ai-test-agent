@@ -1,0 +1,93 @@
+# 缺陷分析「人工标注集」（Day 29 评测用）
+#
+# 每条都是一个真实世界里会出现的失败样本：
+#   error    / traceback  —— 从 pytest 失败输出里抠出来的原文（已脱敏）
+#   expected_category      —— 人工判定的正确「缺陷分类」
+#                             （必须是 agent/defect_analyzer.py 的白名单之一：
+#                              UI问题 / 接口问题 / 测试数据问题 / 元素定位问题 /
+#                              环境问题 / 代码问题 / 未知）
+#   expected_severity     —— 人工判定的正确「严重程度」P0~P3
+#   note                  —— 为什么是这个分类（给自己/面试看）
+#
+# 评测脚本 eval/eval_defect_accuracy.py 会把这些样本丢给 AI 缺陷分析器，
+# 看它判出来的 category/severity 和这里的标注对不对得上，算出「分析准确率」。
+# 这是面试里最硬的指标之一：AI 不只是"能分析"，而且"分析得对"。
+
+- id: D001
+  test_name: tests/test_login.py::test_login_ok
+  error: "AssertionError: assert 'Logged in as zoe' in 'Your email or password is incorrect!'"
+  traceback: |
+    E       AssertionError: assert 'Logged in as zoe' in 'Your email or password is incorrect!'
+    login_page.py:42: in login
+        assert expected in self.get_login_user()
+  expected_category: 测试数据问题
+  expected_severity: P1
+  note: 账号/密码本身不对（或测试账号未建好），不是定位也不是 UI，根因在数据。
+
+- id: D002
+  test_name: tests/test_login.py::test_login_button
+  error: "TimeoutError: locator.click: Timeout 30000ms exceeded"
+  traceback: |
+    E   TimeoutError: locator.click: Timeout 30000ms exceeded
+    E       waiting for selector "#login-btn" to be visible
+  expected_category: 元素定位问题
+  expected_severity: P1
+  note: 选择器失效（页面改版后 id 变了），点击等不到元素。
+
+- id: D003
+  test_name: tests/test_cart.py::test_add_to_cart
+  error: "AssertionError: assert 1 == 2"
+  traceback: |
+    E   AssertionError: assert 1 == 2
+    test_cart.py:30: cart_page.get_item_count() 返回 1
+  expected_category: 代码问题
+  expected_severity: P2
+  note: 数量断言写错/生成代码逻辑错误（下单流程里多扣了一次），属测试代码本身的问题。
+
+- id: D004
+  test_name: tests/test_search.py::test_search
+  error: " AssertionError: assert 'iPhone' in '服务器开小差了'"
+  traceback: |
+    E   AssertionError: assert 'iPhone' in '服务器开小差了'
+    product_page.py:18: in search
+  expected_category: 接口问题
+  expected_severity: P1
+  note: 后端返回了 500/错误文案，说明搜索接口挂了，不是前端。
+
+- id: D005
+  test_name: tests/test_login.py::test_login_ui
+  error: "AssertionError: assert page.is_visible('弹窗关闭按钮')"
+  traceback: |
+    E   AssertionError: 登录成功后期望的欢迎弹窗没出现
+    test_login.py:55: assert page.is_visible(...)
+  expected_category: UI问题
+  expected_severity: P3
+  note: 页面元素可见性/文案差异（如弹窗被 A/B 实验关了），纯前端表现层。
+
+- id: D006
+  test_name: tests/test_login.py::test_login_ci
+  error: "Error: Failed to launch chromium: Executable doesn't exist"
+  traceback: |
+    E   Error: Failed to launch chromium: Executable doesn't exist at .../chromium
+  expected_category: 环境问题
+  expected_severity: P0
+  note: 浏览器没装/CI 机器缺依赖，整个执行环境就起不来，最严重。
+
+- id: D007
+  test_name: tests/test_checkout.py::test_checkout_timeout
+  error: "TimeoutError: page.wait_for_url: Timeout 30000ms exceeded"
+  traceback: |
+    E   TimeoutError: page.wait_for_url("**/checkout/success"): Timeout exceeded
+  expected_category: 元素定位问题
+  expected_severity: P2
+  note: 等待结果页超时，通常是点击后没等到跳转（等待不足或定位不稳），归类到定位/等待。
+
+- id: D008
+  test_name: tests/test_register.py::test_register
+  error: "AssertionError: assert '注册成功' in page.content()"
+  traceback: |
+    E   AssertionError: assert '注册成功' in page.content()
+    E   实际页面含：数据库连接失败
+  expected_category: 接口问题
+  expected_severity: P0
+  note: 注册依赖的数据库/服务挂了，接口层错误，影响整条链路，严重程度高。

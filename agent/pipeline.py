@@ -38,6 +38,7 @@ from typing import Any
 from agent import planner as _planner
 from agent.code_generator import CodeGenerator
 from agent.defect_agent import DefectAnalysisAgent, DefectReport
+from agent import project_profile
 from config import settings
 from tools import file_io, human, test_runner
 from tools.logger import get_logger
@@ -74,6 +75,7 @@ def run_pipeline(
     allure: bool = False,
     max_repairs: int = 1,
     runner: Any | None = None,
+    profile: project_profile.ProjectProfile | None = None,
 ) -> PipelineReport:
     """跑完整条流水线，返回汇总。
 
@@ -85,6 +87,8 @@ def run_pipeline(
                   默认 False，遵守 Day 19 的 Human-in-the-loop）
         runner    执行 pytest 的函数；默认 tools.test_runner.run_pytest。
                   传给缺陷分析 Agent 用（测试可传桩函数，避免真开浏览器）。
+        profile   目标项目档案（Day 28）。传给 CodeGenerator 和 run_pytest，
+                  让"生成代码"和"执行"都按同一份档案走，接新项目不必改代码。
     """
     report = PipelineReport(feature=feature)
 
@@ -98,7 +102,7 @@ def run_pipeline(
 
     # ---- 4. 用例 → Playwright 代码 ----
     print("【2/6】生成 Playwright 代码 ...")
-    generator = CodeGenerator(client=client, max_repairs=max_repairs)
+    generator = CodeGenerator(client=client, max_repairs=max_repairs, profile=profile)
     generated = generator.generate_many(feature, cases, limit=limit)
     print(f"       代码生成 {len(generated)} 个")
 
@@ -137,7 +141,7 @@ def run_pipeline(
     print(f"【4/6】执行 pytest（浏览器 {browser}）...")
     exec_target = saved[0] if len(saved) == 1 else dir_for_confirm
     result = test_runner.run_pytest(
-        exec_target, browser=browser, timeout=timeout, allure=allure,
+        exec_target, browser=browser, timeout=timeout, allure=allure, profile=profile,
     )
     report.exec_result = result.to_dict()
     print(f"       结果：{result.describe()}")

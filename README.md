@@ -75,5 +75,43 @@ ai-test-agent/
 | Day 3 | JSON / YAML / 文件操作 | ✅ |
 | Day 4 | 异常处理 + 日志 | ✅ |
 | Day 5 | 第一次调用大模型 | ✅ |
+| Day 6–15 | Prompt 工程 / 结构化用例 / 评审 / 测试数据 / Tool Calling / Agent MVP | ✅ |
+| Day 16–20 | 用例 → Playwright 代码 → 静态检查 → 人工确认 → pytest 执行 | ✅ |
+| Day 21–27 | 截图 / 失败收集 / AI 缺陷分析 / 决策循环 / 全链路流水线 | ✅ |
+| **Day 28** | **工程化解耦：项目档案，让 Agent 适配任意被测网站** | ✅ |
+| **Day 29** | **三套评测体系（覆盖率 / 代码首版通过率 / 缺陷准确率）** | ✅ |
+| **Day 30** | **面试材料（自我介绍 / 演示脚本 / 问答）** | ✅ |
 
-详细笔记见 `../docs/notes/`，每日日志见 `../docs/daily/`。
+## 它不绑定某一个网站（Day 28 重点）
+
+"接哪个被测项目"由 `config/profiles/<名字>.yaml` 一份档案决定，不再硬编码。
+换被测网站只需复制一份 yaml 改两行，再 `--profile 名字` 指定，代码一行不动；
+页面类甚至能自动扫描发现。详见 `docs/notes/Day28-工程化解耦-适配任意被测网站.md`。
+
+```bash
+python main.py run --profile ecommerce --feature "用户登录功能" --auto
+python main.py run --profile myproject --feature "登录功能"   # 接新项目
+```
+
+## 评测（Day 29）
+
+三套评测都不依赖浏览器，可每天跑、可复现：
+
+```bash
+python eval/eval_coverage.py          # 用例场景覆盖率
+python eval/eval_code_passrate.py     # 代码首版 / 修正后通过率
+python eval/eval_defect_accuracy.py   # 缺陷分析准确率（含人工标注集）
+```
+
+## 文档
+
+- 总地图：`docs/00-导航.md`
+- 学习笔记：`docs/notes/`（Day 28 / Day 29 为重点）
+- 每日日志：`docs/daily/`
+- 面试材料：`docs/interview/`
+
+## 测试
+
+```bash
+python -m pytest     # 107 个单元测试，全绿
+```

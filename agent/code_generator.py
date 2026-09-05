@@ -53,7 +53,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agent import llm_client
+from agent import llm_client, project_profile
 from agent.models import TestCase
 from config import settings
 from prompts import loader
@@ -122,8 +122,25 @@ FORBIDDEN_IN_TEST = (
 )
 
 
-def resolve_page(feature: str) -> tuple[str, str, str]:
-    """根据功能名找到该用哪个页面对象。"""
+def resolve_page(
+    feature: str,
+    profile: project_profile.ProjectProfile | None = None,
+) -> tuple[str, str, str]:
+    """根据功能名找到该用哪个页面对象。返回 (类名, 模块, 方法提示)。
+
+    Day 28 重构：不再只查本文件里写死的 PAGE_REGISTRY，
+    而是优先走"项目档案"（config/profiles/*.yaml）。
+    档案支持自动发现目标项目的页面类，所以接新项目**不用改这里的代码**。
+
+    找不到档案时，退回旧的 PAGE_REGISTRY 行为（向后兼容，保证老测试仍能跑）。
+    """
+    prof = profile if profile is not None else project_profile.load_profile()
+    if prof.pages or prof.fallback_page or prof.exists:
+        spec = prof.resolve_page(feature)
+        if spec.class_name:
+            return spec.class_name, spec.module, spec.hint
+
+    # 兜底：沿用本文件里的硬编码表（老行为）
     for keyword, page_class, module, hint in PAGE_REGISTRY:
         if keyword in feature:
             return page_class, module, hint
@@ -206,7 +223,10 @@ def _class_methods(path: Path) -> dict[str, set[str]]:
     return classes
 
 
-def load_page_methods(page_module: str = "pages.login_page") -> set[str]:
+def load_page_methods(
+    page_module: str = "pages.login_page",
+    profile: project_profile.ProjectProfile | None = None,
+) -> set[str]:
     """拿到某个页面对象**真实拥有**的方法名（含从 BasePage 继承来的）。
 
     这是本项目最实用的一道检查。为什么必须有它？
@@ -219,23 +239,10 @@ def load_page_methods(page_module: str = "pages.login_page") -> set[str]:
         所以光检查"守不守规矩"不够，还得检查"调的方法是不是真的存在"。
         方法清单直接从目标项目源码里静态解析，永远和真实代码同步。
     """
-    pages_root = settings.TEST_PROJECT_DIR / "pages"
-    page_path = pages_root / Path(page_module.replace(".", "/") + ".py").name
-
-    page_classes = _class_methods(page_path)
-    if not page_classes:
-        return set()
-
-    methods: set[str] = set()
-    for names in page_classes.values():
-        methods |= names
-
-    # 加上基类（BasePage）提供的方法，例如 open / click / fill / get_text
-    base_classes = _class_methods(pages_root / "base_page.py")
-    for names in base_classes.values():
-        methods |= names
-
-    return methods
+    # Day 28：改走"项目档案"，路径和基类文件名都从档案读，
+    # 这样接一个 pages 目录结构不同的项目也不用改代码。
+    prof = profile if profile is not None else project_profile.load_profile()
+    return prof.load_methods(page_module)
 
 
 def _find_page_calls(tree: ast.AST, page_class: str) -> tuple[str | None, list[str]]:
@@ -273,11 +280,14 @@ def validate_code(
     code: str,
     page_class: str = "LoginPage",
     page_module: str = "pages.login_page",
+    profile: project_profile.ProjectProfile | None = None,
 ) -> list[str]:
     """检查生成的代码，返回问题清单（空列表 = 合格）。
 
     注意：这里**不执行**代码，只用 ast 做静态检查。
     执行未知代码是危险的，这也是 Day 19 要加人工确认的原因。
+
+    Day 28：方法真实性检查改为从"项目档案"读，可适配任意目标项目。
     """
     issues: list[str] = []
 
@@ -325,7 +335,7 @@ def validate_code(
 
     # ---- 5. 方法真实性检查：调的方法在页面对象里真的存在吗？ ----
     # 这是抓"模型编造方法名"的关键一道关（详见 load_page_methods 的注释）。
-    real_methods = load_page_methods(page_module)
+    real_methods = load_page_methods(page_module, profile)
     if real_methods:
         _page_var, called_methods = _find_page_calls(tree, page_class)
         unknown = sorted({m for m in called_methods if m not in real_methods})
@@ -364,15 +374,19 @@ class CodeGenerator:
         client: llm_client.LLMClient | None = None,
         template: str = DEFAULT_TEMPLATE,
         max_repairs: int = 1,
+        profile: project_profile.ProjectProfile | None = None,
     ) -> None:
         self.client = client or llm_client.get_client()
         self.template = template
         self.max_repairs = max_repairs
+        # Day 28：一份档案决定"接哪个项目、用哪个页面对象"。
+        # 只加载一次，后面到处复用（避免每个用例都去读一遍 YAML + 扫源码）。
+        self.profile = profile if profile is not None else project_profile.load_profile()
 
     # ------------------------------------------------------------------
     def generate(self, feature: str, case: TestCase) -> GeneratedCode:
         """为一个测试用例生成测试代码（含自修正）。"""
-        page_class, page_module, page_hint = resolve_page(feature)
+        page_class, page_module, page_hint = resolve_page(feature, self.profile)
 
         result = GeneratedCode(
             feature=feature,
@@ -388,7 +402,7 @@ class CodeGenerator:
         result.attempts = 1
 
         code = extract_python_code(raw)
-        issues = validate_code(code, page_class, page_module)
+        issues = validate_code(code, page_class, page_module, self.profile)
 
         # ---- 2. 自修正：把问题清单告诉模型，让它改一版 ----
         while issues and result.repairs_used < self.max_repairs:
@@ -400,7 +414,7 @@ class CodeGenerator:
             fix_prompt = loader.load(FIX_TEMPLATE, errors="\n".join(f"- {i}" for i in issues), raw=raw)
             raw = self.client.chat_messages(fix_prompt.to_messages(), mock_hint="code")
             code = extract_python_code(raw)
-            issues = validate_code(code, page_class, page_module)
+            issues = validate_code(code, page_class, page_module, self.profile)
 
         result.code = code
         result.issues = issues
@@ -438,7 +452,7 @@ class CodeGenerator:
         # 这是防止模型编造方法名最有效的一招：
         # 与其等它写错了再用检查去纠错，不如**一开始就给它准确的清单**。
         # （纠错要花第二次调用的钱，而且它第二次还可能编出新的错名字。）
-        real_methods = load_page_methods(page_module)
+        real_methods = load_page_methods(page_module, self.profile)
         page_methods = "、".join(sorted(m for m in real_methods if not m.startswith("__")))
 
         prompt = loader.load(

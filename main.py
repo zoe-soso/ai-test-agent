@@ -615,18 +615,21 @@ def _load_cases_for_code(args: argparse.Namespace, client: object) -> tuple[list
 
 def cmd_code(args: argparse.Namespace) -> int:
     """Day 16~20：测试用例 -> Playwright 代码 -> 人工确认 -> 执行 pytest。"""
-    from agent import llm_client
+    from agent import llm_client, project_profile
     from agent.code_generator import CodeGenerator
     from tools import test_runner
     from tools.human import ask_yes_no, confirm_execution
 
     client = llm_client.get_client()
+    # Day 28：一份档案决定"接哪个项目"。不传 --profile 就用默认（ecommerce）。
+    profile = project_profile.load_profile(args.profile)
 
     print("=" * 58)
     print("  Day 16~20：测试用例 → Playwright 代码 → 执行")
     print("=" * 58)
     print(f"  功能     : {args.feature}")
     print(f"  生成条数 : {args.limit}")
+    print(f"  目标项目 : {profile.describe()}")
     print(f"  执行测试 : {'是（会先让你确认）' if args.run else '否'}")
     print(f"  运行模式 : {'Mock（离线）' if client.is_mock else '真实调用'}")
     print("=" * 58)
@@ -646,7 +649,7 @@ def cmd_code(args: argparse.Namespace) -> int:
     print(f"\n[1/4] 待转换用例 {len(cases)} 条（来源：{source}）")
 
     # ---- 2. 生成代码 ----
-    generator = CodeGenerator(client=client, max_repairs=args.max_repairs)
+    generator = CodeGenerator(client=client, max_repairs=args.max_repairs, profile=profile)
     results = generator.generate_many(args.feature, cases, limit=args.limit)
     print("[2/4] 代码生成完成")
 
@@ -685,7 +688,7 @@ def cmd_code(args: argparse.Namespace) -> int:
         return 0
 
     print(f"\n正在执行：{target}（浏览器 {args.browser}）")
-    result = test_runner.run_pytest(target, browser=args.browser, timeout=args.timeout)
+    result = test_runner.run_pytest(target, browser=args.browser, timeout=args.timeout, profile=profile)
 
     print("\n【执行结果】")
     for key, value in result.to_dict().items():
@@ -701,16 +704,19 @@ def cmd_code(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Day 27：把整条流水线跑一遍（项目核心 Demo）。"""
-    from agent import llm_client
+    from agent import llm_client, project_profile
     from agent.pipeline import run_pipeline
 
     client = llm_client.get_client()
+    # Day 28：一份档案决定"接哪个项目"。不传 --profile 就用默认（ecommerce）。
+    profile = project_profile.load_profile(args.profile)
 
     print("=" * 60)
     print("  Day 27 完整流水线：需求 → 用例 → 代码 → 执行 → AI 分析")
     print("=" * 60)
     print(f"  功能     : {args.feature}")
     print(f"  生成条数 : {args.limit}")
+    print(f"  目标项目 : {profile.describe()}")
     print(f"  Allure   : {'是' if args.allure else '否'}")
     print(f"  人工确认 : {'--auto 已跳过' if args.auto else '执行前会让你确认（Human-in-the-loop）'}")
     print(f"  运行模式 : {'Mock（离线）' if client.is_mock else '真实调用'}")
@@ -726,6 +732,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         timeout=args.timeout,
         allure=args.allure,
         max_repairs=args.max_repairs,
+        profile=profile,
     )
     return 0
 
@@ -911,6 +918,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_code.add_argument("--browser", default="chromium", help="只用哪种浏览器跑，默认 chromium")
     p_code.add_argument("--timeout", type=int, default=300, help="执行超时秒数")
     p_code.add_argument(
+        "--profile", default=None,
+        help="目标项目档案名（config/profiles/<名>.yaml）；不填用默认 ecommerce。"
+             "换被测网站只需新建一份 yaml 再 --profile 指定，代码不用动（Day 28）。",
+    )
+    p_code.add_argument(
         "--yes", action="store_true",
         help="所有确认自动选是（CI 用；本地演示时不建议，会跳过人工确认）",
     )
@@ -932,6 +944,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument(
         "--auto", action="store_true",
         help="跳过人工确认直接执行（CI/演示用；平时不建议，违反 Human-in-the-loop）",
+    )
+    p_run.add_argument(
+        "--profile", default=None,
+        help="目标项目档案名（config/profiles/<名>.yaml）；不填用默认 ecommerce。"
+             "换被测网站只需新建一份 yaml 再 --profile 指定，代码不用动（Day 28）。",
     )
     p_run.set_defaults(func=cmd_run)
 
