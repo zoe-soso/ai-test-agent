@@ -1,0 +1,33 @@
+{
+  "total": 3,
+  "first_pass_rate": 0.3333333333333333,
+  "repaired_pass_rate": 0.6666666666666666,
+  "avg_repairs": 0.3333333333333333,
+  "rows": [
+    {
+      "feature": "用户登录功能",
+      "case_id": "TC_LOGIN_001",
+      "first_ok": false,
+      "repaired_ok": true,
+      "repairs_used": 0,
+      "error": ""
+    },
+    {
+      "feature": "购物车结算",
+      "case_id": "TC_CART_001",
+      "first_ok": false,
+      "repaired_ok": false,
+      "repairs_used": 1,
+      "error": ""
+    },
+    {
+      "feature": "注册功能",
+      "case_id": "TC_REG_001",
+      "first_ok": true,
+      "repaired_ok": true,
+      "repairs_used": 0,
+      "error": ""
+    }
+  ],
+  "mode": "real"
+}

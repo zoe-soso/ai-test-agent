@@ -1,0 +1,101 @@
+{
+  "total": 5,
+  "avg_structure_rate": 1.0,
+  "avg_coverage_rate": 0.9714285714285713,
+  "rows": [
+    {
+      "case_id": "cart",
+      "feature": "购物车功能",
+      "structure_rate": 1.0,
+      "coverage_rate": 1.0,
+      "covered": [
+        "加入购物车成功",
+        "修改数量",
+        "删除商品",
+        "购物车为空",
+        "数量边界值",
+        "金额计算"
+      ],
+      "missed": [],
+      "cases_valid": 10,
+      "cases_total": 10,
+      "error": ""
+    },
+    {
+      "case_id": "checkout",
+      "feature": "下单结算功能",
+      "structure_rate": 1.0,
+      "coverage_rate": 0.8571428571428571,
+      "covered": [
+        "下单成功",
+        "收货地址为空",
+        "未选配送方式",
+        "未选支付方式",
+        "支付信息非法",
+        "未登录下单"
+      ],
+      "missed": [
+        "库存不足"
+      ],
+      "cases_valid": 7,
+      "cases_total": 7,
+      "error": ""
+    },
+    {
+      "case_id": "login",
+      "feature": "用户登录功能",
+      "structure_rate": 1.0,
+      "coverage_rate": 1.0,
+      "covered": [
+        "正常登录成功",
+        "密码错误",
+        "账号不存在",
+        "邮箱为空",
+        "密码为空",
+        "超长输入",
+        "特殊字符"
+      ],
+      "missed": [],
+      "cases_valid": 10,
+      "cases_total": 10,
+      "error": ""
+    },
+    {
+      "case_id": "register",
+      "feature": "用户注册功能",
+      "structure_rate": 1.0,
+      "coverage_rate": 1.0,
+      "covered": [
+        "注册成功",
+        "邮箱已被注册",
+        "两次密码不一致",
+        "密码长度不足",
+        "邮箱格式非法",
+        "必填项为空"
+      ],
+      "missed": [],
+      "cases_valid": 10,
+      "cases_total": 10,
+      "error": ""
+    },
+    {
+      "case_id": "search",
+      "feature": "商品搜索功能",
+      "structure_rate": 1.0,
+      "coverage_rate": 1.0,
+      "covered": [
+        "搜索到匹配商品",
+        "搜索无结果",
+        "关键词为空",
+        "超长关键词",
+        "特殊字符关键词",
+        "分页"
+      ],
+      "missed": [],
+      "cases_valid": 8,
+      "cases_total": 8,
+      "error": ""
+    }
+  ],
+  "mode": "real"
+}
