@@ -1,0 +1,105 @@
+{
+  "total": 8,
+  "category_accuracy": 0.125,
+  "severity_accuracy": 0.375,
+  "classify_rate": 1.0,
+  "rows": [
+    {
+      "sample_id": "D001",
+      "test_name": "tests/test_login.py::test_login_ok",
+      "predicted_category": "UI问题",
+      "expected_category": "测试数据问题",
+      "category_ok": false,
+      "predicted_severity": "P1",
+      "expected_severity": "P1",
+      "severity_ok": true,
+      "classified": true,
+      "error": ""
+    },
+    {
+      "sample_id": "D002",
+      "test_name": "tests/test_login.py::test_login_button",
+      "predicted_category": "UI问题",
+      "expected_category": "元素定位问题",
+      "category_ok": false,
+      "predicted_severity": "P1",
+      "expected_severity": "P1",
+      "severity_ok": true,
+      "classified": true,
+      "error": ""
+    },
+    {
+      "sample_id": "D003",
+      "test_name": "tests/test_cart.py::test_add_to_cart",
+      "predicted_category": "UI问题",
+      "expected_category": "代码问题",
+      "category_ok": false,
+      "predicted_severity": "P1",
+      "expected_severity": "P2",
+      "severity_ok": false,
+      "classified": true,
+      "error": ""
+    },
+    {
+      "sample_id": "D004",
+      "test_name": "tests/test_search.py::test_search",
+      "predicted_category": "UI问题",
+      "expected_category": "接口问题",
+      "category_ok": false,
+      "predicted_severity": "P1",
+      "expected_severity": "P1",
+      "severity_ok": true,
+      "classified": true,
+      "error": ""
+    },
+    {
+      "sample_id": "D005",
+      "test_name": "tests/test_login.py::test_login_ui",
+      "predicted_category": "UI问题",
+      "expected_category": "UI问题",
+      "category_ok": true,
+      "predicted_severity": "P1",
+      "expected_severity": "P3",
+      "severity_ok": false,
+      "classified": true,
+      "error": ""
+    },
+    {
+      "sample_id": "D006",
+      "test_name": "tests/test_login.py::test_login_ci",
+      "predicted_category": "UI问题",
+      "expected_category": "环境问题",
+      "category_ok": false,
+      "predicted_severity": "P1",
+      "expected_severity": "P0",
+      "severity_ok": false,
+      "classified": true,
+      "error": ""
+    },
+    {
+      "sample_id": "D007",
+      "test_name": "tests/test_checkout.py::test_checkout_timeout",
+      "predicted_category": "UI问题",
+      "expected_category": "元素定位问题",
+      "category_ok": false,
+      "predicted_severity": "P1",
+      "expected_severity": "P2",
+      "severity_ok": false,
+      "classified": true,
+      "error": ""
+    },
+    {
+      "sample_id": "D008",
+      "test_name": "tests/test_register.py::test_register",
+      "predicted_category": "UI问题",
+      "expected_category": "接口问题",
+      "category_ok": false,
+      "predicted_severity": "P1",
+      "expected_severity": "P0",
+      "severity_ok": false,
+      "classified": true,
+      "error": ""
+    }
+  ],
+  "mode": "real"
+}
