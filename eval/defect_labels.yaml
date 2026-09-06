@@ -91,3 +91,306 @@
   expected_category: 接口问题
   expected_severity: P0
   note: 注册依赖的数据库/服务挂了，接口层错误，影响整条链路，严重程度高。
+
+# ============ 以下为 D009~D036 扩充样本（2026-09-06）============
+#
+# 扩充原则（重要）：标注答案必须能从报错文本里推断出来，否则指标测的是运气。
+# 因此每条样本的报错中都刻意保留了「严重度线索词」：
+#   P0 → 出现「所有/整批/全部/连接池/数据库/无法启动/collected 0」等阻塞性描述
+#   P1 → 单个功能模块稳定失败，不涉及基础设施
+#   P2 → 出现「偶发/重试通过/脚本/断言写法/并发/时机」等边界或脚本自身问题
+#   P3 → 出现「文案/颜色/样式/边距/无障碍属性」且明确写了「功能正常/不影响使用」
+
+# ---------- P0：影响面最大，整批瘫痪或基础设施故障 ----------
+- id: D009
+  test_name: tests/test_cart.py::test_add_to_cart
+  error: "Error: browserType.launch: Executable doesn't exist at C:/ms-playwright/chromium-1148/chrome.exe"
+  traceback: |
+    E   Error: browserType.launch: Executable doesn't exist
+    E   —— 本轮 25 条用例全部在启动阶段失败，无一条进入业务步骤
+  expected_category: 环境问题
+  expected_severity: P0
+  note: 浏览器驱动缺失，整批用例无法启动，阻塞范围最大。
+
+- id: D010
+  test_name: tests/test_login.py::test_login_ok
+  error: "ConnectionError: HTTPConnectionPool(host='staging.example.com', port=8080): Max retries exceeded"
+  traceback: |
+    E   ConnectionError: Connection refused
+    conftest.py:28: in base_url fixture
+    E   —— 被测环境不通，本轮所有用例在 fixture 阶段即失败
+  expected_category: 环境问题
+  expected_severity: P0
+  note: 环境连接被拒，不是业务问题，整批阻塞。
+
+- id: D011
+  test_name: tests/test_checkout.py::test_pay_order
+  error: "AssertionError: assert 200 == 503"
+  traceback: |
+    E   AssertionError: assert 200 == 503
+    E   POST /api/checkout -> 503 Service Unavailable
+    E   —— 下单链路 12 条用例全部失败，支付服务不可用
+  expected_category: 接口问题
+  expected_severity: P0
+  note: 支付服务 503，整条下单链路瘫痪，非单点问题。
+
+- id: D012
+  test_name: tests/test_register.py::test_register
+  error: "OperationalError: (2003, \"Can't connect to MySQL server on 'db.internal'\")"
+  traceback: |
+    E   OperationalError: Can't connect to MySQL server (2003)
+    E   —— 所有依赖数据库的用例（共 19 条）全部失败
+  expected_category: 接口问题
+  expected_severity: P0
+  note: 数据库连不上，属基础设施故障，影响面覆盖全部数据相关用例。
+
+- id: D013
+  test_name: tests/test_login.py::test_login_with_pool_account
+  error: "AssertionError: 可用测试账号数量 = 0"
+  traceback: |
+    E   AssertionError: 账号池为空，可用账号 0 个
+    E   —— 18 条依赖登录态的用例全部失败
+  expected_category: 测试数据问题
+  expected_severity: P0
+  note: 账号池被清空，不是单个账号的问题，而是整批数据不可用，阻塞范围大。
+
+- id: D014
+  test_name: tests/test_smoke.py::test_smoke
+  error: "ERROR collecting tests/conftest.py"
+  traceback: |
+    E   SyntaxError: invalid syntax (conftest.py, line 12)
+    E   collected 0 items / 0 selected
+    E   —— 收集阶段即失败，全部用例无法执行
+  expected_category: 代码问题
+  expected_severity: P0
+  note: conftest 语法错误导致收集阶段失败，0 条用例能跑，虽是脚本问题但阻塞整批，故判 P0。
+
+# ---------- P1：单个功能模块稳定失败，不涉及基础设施 ----------
+- id: D015
+  test_name: tests/test_cart.py::test_add_to_cart
+  error: "TimeoutError: locator.click: Timeout 30000ms exceeded"
+  traceback: |
+    E   TimeoutError: locator.click: Timeout 30000ms exceeded
+    E   waiting for selector "button[data-qa='add-to-cart']" to be visible
+    cart_page.py:33: in add_to_cart
+  expected_category: 元素定位问题
+  expected_severity: P1
+  note: 加购按钮选择器失效，仅购物车模块受影响，其他模块正常。
+
+- id: D016
+  test_name: tests/test_product.py::test_product_detail
+  error: "AssertionError: assert 200 == 404"
+  traceback: |
+    E   AssertionError: assert 200 == 404
+    E   GET /api/products/12345 -> 404 Not Found
+    E   商品详情接口返回 404，该商品疑似已下架
+  expected_category: 接口问题
+  expected_severity: P1
+  note: 单个商品接口 404，影响商品详情模块，不阻塞其他链路。
+
+- id: D017
+  test_name: tests/test_checkout.py::test_apply_coupon
+  error: "AssertionError: assert '优惠券已过期' not in page.content()"
+  traceback: |
+    E   AssertionError: 页面出现「优惠券已过期」
+    E   使用的优惠券 SAVE20 有效期至 2026-08-01，当前已过期
+  expected_category: 测试数据问题
+  expected_severity: P1
+  note: 优惠券数据过期，仅影响优惠券相关场景，属单点数据问题。
+
+- id: D018
+  test_name: tests/test_checkout.py::test_amount
+  error: "AssertionError: assert '¥199.00' == '¥99.00'"
+  traceback: |
+    E   AssertionError: assert '¥199.00' == '¥99.00'
+    E   结算页实付金额与购物车小计不符，差额 ¥100
+  expected_category: UI问题
+  expected_severity: P1
+  note: 金额显示错误直接影响交易，不是纯展示问题，判 P1。
+
+- id: D019
+  test_name: tests/test_search.py::test_search_result
+  error: "AssertionError: assert 0 == 10"
+  traceback: |
+    E   AssertionError: assert 0 == 10
+    E   搜索结果列表为空：div.product-list 容器未渲染任何子元素
+    E   接口返回 10 条数据，但前端列表未渲染
+  expected_category: 元素定位问题
+  expected_severity: P1
+  note: 列表容器改版导致取不到子元素，仅搜索模块受影响。
+
+- id: D020
+  test_name: tests/test_order.py::test_create_order
+  error: "AssertionError: assert '下单成功' in response.text"
+  traceback: |
+    E   AssertionError: 下单失败
+    E   POST /api/order -> 200，body: {"code": 4001, "msg": "库存不足"}
+  expected_category: 接口问题
+  expected_severity: P1
+  note: 业务级接口错误（库存不足），影响下单模块，服务本身可用，判 P1。
+
+- id: D021
+  test_name: tests/test_checkout.py::test_address
+  error: "AssertionError: assert '收货地址' in page.content()"
+  traceback: |
+    E   AssertionError: 结算页未出现收货地址区块
+    E   该测试账号未配置任何收货地址，结算流程无法继续
+  expected_category: 测试数据问题
+  expected_severity: P1
+  note: 单个账号数据不完整，仅结算场景受影响。
+
+- id: D022
+  test_name: tests/test_profile.py::test_load_profile
+  error: "TimeoutError: Timeout 30000ms exceeded"
+  traceback: |
+    E   TimeoutError: 等待 /api/user/profile 响应超时
+    E   接口耗时 32s，超过用例设定的 30s 阈值
+    E   该接口本次稳定超时，重试 3 次均超时
+  expected_category: 接口问题
+  expected_severity: P1
+  note: 单个接口稳定超时（非偶发），影响个人中心模块。
+
+# ---------- P2：偶发、边界，或失败源于测试脚本自身 ----------
+- id: D023
+  test_name: tests/test_login.py::test_login_ok
+  error: "AssertionError: assert 'Logged in as zoe' == 'Logged in as zoe '"
+  traceback: |
+    E   AssertionError: 实际文本尾部多了一个空格
+    E   断言未做 strip()，属脚本断言写法不严谨，产品功能正常
+  expected_category: 代码问题
+  expected_severity: P2
+  note: 脚本断言写法问题，产品无缺陷，判 P2 而非 P1。
+
+- id: D024
+  test_name: tests/test_cart.py::test_cart_count
+  error: "AssertionError: assert 2 == 1"
+  traceback: |
+    E   AssertionError: assert 2 == 1
+    E   用例内重复调用了两次 add_to_cart，购物车数量多算 1
+    E   手工验证：实际加购一次，产品行为正确
+  expected_category: 代码问题
+  expected_severity: P2
+  note: 脚本逻辑重复执行，产品功能正常，判 P2。
+
+- id: D025
+  test_name: tests/test_search.py::test_search_result
+  error: "TimeoutError: page.wait_for_selector: Timeout 5000ms exceeded"
+  traceback: |
+    E   TimeoutError: 等待搜索结果超时（阈值 5s）
+    E   重试 3 次中 1 次失败、2 次通过 —— 偶发，非稳定复现
+  expected_category: 元素定位问题
+  expected_severity: P2
+  note: 偶发失败且重试能通过，不是稳定缺陷，判 P2。
+
+- id: D026
+  test_name: tests/test_checkout.py::test_total
+  error: "AttributeError: 'CartPage' object has no attribute 'get_total_price'"
+  traceback: |
+    E   AttributeError: 'CartPage' object has no attribute 'get_total_price'
+    E   调用了 Page 类中不存在的方法，属脚本调用错误
+  expected_category: 代码问题
+  expected_severity: P2
+  note: 脚本调用了不存在的方法，产品无问题，判 P2。
+
+- id: D027
+  test_name: tests/test_cart.py::test_update_quantity
+  error: "TimeoutError: locator.click: Timeout 10000ms exceeded"
+  traceback: |
+    E   TimeoutError: 点击「修改数量」超时
+    E   页面上仍有 loading 遮罩未消失，脚本未等待遮罩消失就点击
+    E   等待时间不足，属脚本等待策略问题
+  expected_category: 元素定位问题
+  expected_severity: P2
+  note: 等待策略不足导致，非产品缺陷，判 P2。
+
+- id: D028
+  test_name: tests/test_register.py::test_register_concurrent
+  error: "AssertionError: assert 'zoe_test_123' not in used_accounts"
+  traceback: |
+    E   AssertionError: 账号 zoe_test_123 已被占用
+    E   并发执行时两个用例抢用了同一个账号 —— 并发边界场景
+    E   串行执行时用例通过
+  expected_category: 测试数据问题
+  expected_severity: P2
+  note: 并发场景下的资源竞争，属边界问题，判 P2。
+
+- id: D029
+  test_name: tests/test_cart.py::test_toast
+  error: "AssertionError: assert page.is_visible('.toast')"
+  traceback: |
+    E   AssertionError: 操作成功的 toast 不可见
+    E   toast 显示 3 秒后自动消失，断言执行时已消失 —— 断言时机问题
+  expected_category: UI问题
+  expected_severity: P2
+  note: 断言时机太晚导致，属脚本时机问题，判 P2。
+
+- id: D030
+  test_name: tests/test_price.py::test_zero_price
+  error: "AssertionError: assert '0' == '0.00'"
+  traceback: |
+    E   AssertionError: 脚本期望 '0.00'，实际返回 '0'
+    E   断言对数字格式要求过严，产品显示正确
+  expected_category: 代码问题
+  expected_severity: P2
+  note: 断言过严，产品无缺陷，判 P2。
+
+# ---------- P3：仅影响展示层，功能本身可用 ----------
+- id: D031
+  test_name: tests/test_login.py::test_welcome_text
+  error: "AssertionError: assert '欢迎回来' == '欢迎回来!'"
+  traceback: |
+    E   AssertionError: 页面文案多了一个感叹号
+    E   登录功能本身正常，仅文案差异
+  expected_category: UI问题
+  expected_severity: P3
+  note: 纯文案差异，功能正常，判 P3。
+
+- id: D032
+  test_name: tests/test_style.py::test_button_color
+  error: "AssertionError: assert 'rgb(255, 0, 0)' == 'rgb(220, 53, 69)'"
+  traceback: |
+    E   AssertionError: 按钮颜色从 #FF0000 调整为 #DC3545
+    E   视觉规范调整，按钮点击功能正常
+  expected_category: UI问题
+  expected_severity: P3
+  note: 颜色调整，功能正常，判 P3。
+
+- id: D033
+  test_name: tests/test_visual.py::test_homepage_snapshot
+  error: "AssertionError: 截图与基线存在像素差异 0.3%"
+  traceback: |
+    E   AssertionError: 视觉回归比对失败，像素差异 0.3%
+    E   差异集中在边距，不影响使用与可读性
+  expected_category: UI问题
+  expected_severity: P3
+  note: 样式微调，不影响功能，判 P3。
+
+- id: D034
+  test_name: tests/test_product.py::test_buy_button_text
+  error: "AssertionError: assert '立即购买' == '马上抢'"
+  traceback: |
+    E   AssertionError: 按钮文案由「立即购买」改为「马上抢」
+    E   点击后下单流程正常
+  expected_category: UI问题
+  expected_severity: P3
+  note: 文案改版，功能正常，判 P3。
+
+- id: D035
+  test_name: tests/test_home.py::test_banner_count
+  error: "AssertionError: assert 3 == 4"
+  traceback: |
+    E   AssertionError: 首页轮播图数量由 3 张增加为 4 张
+    E   属运营配置调整，展示内容变化，页面功能正常
+  expected_category: UI问题
+  expected_severity: P3
+  note: 展示内容调整，判 P3。
+
+- id: D036
+  test_name: tests/test_a11y.py::test_img_alt
+  error: "AssertionError: assert page.get_attribute('img', 'alt') == '商品图'"
+  traceback: |
+    E   AssertionError: 商品图片的 alt 属性为空
+    E   无障碍属性缺失，图片正常显示，不影响功能
+  expected_category: UI问题
+  expected_severity: P3
+  note: 无障碍属性缺失，不影响主流程，判 P3。
