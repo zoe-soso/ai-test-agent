@@ -1,0 +1,76 @@
+# ==========================================================
+# AI Test Agent · CI 配置模板
+#
+# 用法：
+#   1. 在 ai-test-agent 项目根建目录  .github/workflows/
+#   2. 把本文件复制过去，改名为  test.yml
+#   3. git add .github/  →  git commit  →  git push
+#   4. 打开 https://github.com/zoe-soso/ai-test-agent/actions 看绿勾
+#
+# 关键说明（已本地验证，可直接用）：
+#   · 不需要配任何 GitHub Secrets。本项目的 107 条单元测试全部走 Mock，
+#     不联网、不花钱、不需要 API Key。
+#   · LLM_MOCK=true 强制离线模式；即使 LLM_API_KEY 为空也不会报错
+#     （config/settings.py 里是 os.getenv(...)，缺失返回 None 而非抛异常）。
+#   · 实测：无 Key + 强制 mock 环境下 107 passed / 2.15s。
+#   · CI 上会有 1 条 skip（test_load_methods_reads_real_source，
+#     它依赖本机电商项目路径，代码里已做 pytest.skip 保护），属于正常，不影响绿勾。
+# ==========================================================
+
+name: AI Test Agent CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 单元测试全部离线 Mock，无需 API Key
+      - name: Run unit tests
+        env:
+          LLM_MOCK: "true"
+        run: |
+          python -m pytest -q --no-header
+
+      - name: Upload test cache
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-result
+          path: .pytest_cache
+          retention-days: 7
+
+# ==========================================================
+# （可选）想在 README 顶部显示绿勾徽章，加这一行：
+#
+#   ![CI](https://github.com/zoe-soso/ai-test-agent/actions/workflows/test.yml/badge.svg)
+#
+# （进阶，暂不需要）以后想让 CI 也跑真实评测：
+#   1. GitHub 仓库 → Settings → Secrets → New repository secret
+#      名字填 LLM_API_KEY，值填 DeepSeek 的 Key
+#   2. 在本文件加一个 job：
+#         - name: Run eval
+#           env:
+#             LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+#           run: python eval/eval_defect_accuracy.py
+#   注意：真实调用会花钱，别设成每次 push 都跑，用 workflow_dispatch 手动触发。
+# ==========================================================
