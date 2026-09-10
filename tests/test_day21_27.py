@@ -13,6 +13,7 @@ Day 21~27 测试
 """
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -172,6 +173,11 @@ def test_defect_agent_no_failure_short_circuits(mock_client):
 # ----------------------------------------------------------------------
 # Day 27：pipeline 全链路（离线，不启动浏览器）
 # ----------------------------------------------------------------------
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="回归测试针对 Windows 反斜杠相对路径（..\\a\\b）的解析语义；"
+           "POSIX 上反斜杠不是路径分隔符，断言不适用。bug 本身也只在 Windows 暴露过。",
+)
 def test_run_pytest_resolves_relative_dotdot_target(monkeypatch):
     """回归：AI 重跑工具给来的相对路径(如 '..\\...\\generated_tests\\x.py')
     必须解析成干净的绝对路径，不能和 PROJECT_ROOT 重复拼接成
