@@ -46,12 +46,24 @@ jobs:
           pip install -r requirements.txt
 
       # 单元测试全部离线 Mock，无需 API Key
+      # set -o pipefail 保证 pytest 失败时本步骤也失败（tee 不吞退出码）
       - name: Run unit tests
         env:
           LLM_MOCK: "true"
         run: |
           source .venv/bin/activate
-          python -m pytest -q --no-header
+          set -o pipefail
+          python -m pytest -q --no-header --tb=short --rf 2>&1 | tee pytest_output.txt
+
+      # 失败时把 pytest 完整结果写进 run 页面的 Summary，
+      # 不用点进日志就能直接看到是哪条测试、为什么失败
+      - name: Dump pytest output to job summary
+        if: failure()
+        run: |
+          echo '### 单元测试结果（末尾 80 行）' >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          tail -80 pytest_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload test cache
         if: always()

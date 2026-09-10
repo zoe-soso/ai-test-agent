@@ -12,6 +12,8 @@ Day 28 单元测试：目标项目档案（ProjectProfile）
 全部不联网；需要被测项目的测试做了 skip 保护（CI 上没装也能绿）。
 """
 
+import sys
+
 import pytest
 
 from agent import project_profile
@@ -32,8 +34,11 @@ def test_load_profile_ecommerce_returns_pages():
     # ecommerce.yaml 里配了 pages 映射
     assert profile.pages, "ecommerce 档案应至少含一个页面映射"
     assert profile.display_name
-    # pages_root 是绝对路径（YAML 里写的是绝对路径）
-    assert profile.pages_root.is_absolute()
+    # pages_root 是绝对路径（YAML 里写的是 Windows 盘符风格 "D:/..."）。
+    # POSIX 语义下盘符路径不以 / 开头、is_absolute() 恒为 False，
+    # 所以绝对性断言只在 Windows 语义下成立。
+    if sys.platform == "win32":
+        assert profile.pages_root.is_absolute()
 
 
 def test_load_profile_missing_falls_back_to_default():

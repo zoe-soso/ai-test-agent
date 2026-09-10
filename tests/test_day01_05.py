@@ -28,7 +28,12 @@ def test_python_version_is_312():
 
 
 def test_test_project_is_readonly_reference():
-    """关联的测试项目必须存在，但我们只读它，不改它。"""
+    """关联的测试项目必须存在，但我们只读它，不改它。
+
+    仅本机可跑：CI 上不存在 D:/PythonProjects/... 这个关联项目。
+    """
+    if not settings.TEST_PROJECT_DIR.exists():
+        pytest.skip("找不到关联的测试项目（CI 环境），跳过")
     assert settings.TEST_PROJECT_DIR.exists()
     assert settings.TEST_PROJECT_PYTHON.exists()
 
