@@ -103,8 +103,16 @@ def test_validate_code_catches_missing_page_import():
     assert any("没有导入页面对象" in i for i in issues)
 
 
-def test_validate_code_catches_hallucinated_method():
-    # 模型最爱编造看起来合理但根本不存在的方法名
+def test_validate_code_catches_hallucinated_method(monkeypatch):
+    # 模型最爱编造看起来合理但根本不存在的方法名。
+    # 方法清单用固定假数据：幻觉检测逻辑不应依赖本机是否恰好装着真实被测项目
+    # （CI 上没有 D:/PythonProjects/...，load_page_methods 会优雅降级返回空，
+    # 真实清单为空时检查整体跳过，这条断言就会落空——曾在 Linux CI 上翻车）。
+    monkeypatch.setattr(
+        code_generator,
+        "load_page_methods",
+        lambda page_module, profile=None: {"login", "open"},
+    )
     bad = GOOD_CODE.replace("login_page.login(email, password)",
                             "login_page.fill_email(email)")
     issues = code_generator.validate_code(bad)
