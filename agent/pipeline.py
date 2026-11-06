@@ -55,7 +55,27 @@ class PipelineReport:
     code_files: list[str] = field(default_factory=list)
     exec_result: dict[str, Any] = field(default_factory=dict)
     defect_report_path: str = ""
+    status: str = "pending"
+    issues: list[str] = field(default_factory=list)
     full: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def exit_code(self) -> int:
+        return {"passed": 0, "cancelled": 2, "generation_failed": 3}.get(self.status, 1)
+
+    def finish(self, status: str) -> "PipelineReport":
+        self.status = status
+        self.full.update({
+            "feature": self.feature,
+            "status": self.status,
+            "cases_count": self.cases_count,
+            "code_files": self.code_files,
+            "exec_result": self.exec_result,
+            "issues": self.issues,
+            "defect_report_path": self.defect_report_path,
+        })
+        self.save()
+        return self
 
     def save(self, path: str | None = None) -> str:
         out = Path(path or (settings.OUTPUT_DIR / "pipeline_report.yaml"))
@@ -111,7 +131,8 @@ def run_pipeline(
     for item in generated:
         for issue in item.issues:
             logger.info("代码问题[%s]：%s", item.filename, issue)
-        if not item.code:
+        if not item.ok:
+            report.issues.extend(item.issues or [f"{item.case_id} 未生成代码"])
             continue
         if auto or human.ask_yes_no(f"是否保存 {item.filename}？", default=True):
             path = generator.save(item)
@@ -121,8 +142,11 @@ def run_pipeline(
 
     if not saved:
         print("       没有可执行的代码，流水线在生成阶段结束。")
-        report.full = report.__dict__.copy()
-        return report
+        return report.finish("generation_failed" if report.issues else "cancelled")
+
+    # 部分代码失败时也不启动执行，避免把不完整批次报告为通过。
+    if report.issues:
+        return report.finish("generation_failed")
 
     # ---- 6. 人工确认（Day 19）----
     # 只跑"本次新保存的文件"，不跑整个 generated_tests/ 目录，
@@ -132,15 +156,14 @@ def run_pipeline(
         code_text = "\n\n".join(Path(p).read_text(encoding="utf-8") for p in saved)
         if not human.confirm_execution(code_text, dir_for_confirm):
             print("       你选择不执行。代码已保存，可随时手动跑。")
-            report.full = report.__dict__.copy()
-            return report
+            return report.finish("cancelled")
 
     # ---- 7. pytest 执行（Day 20）----
-    # 只跑一条(默认 limit=1)就传单个文件；多条时跑本次文件的目录。
-    # 这里 saved 里的路径都是绝对路径(CodeGenerator.save 返回)，可直接交给 run_pytest。
+    # 多条也只执行本次文件，不带入目录里的旧脚本。
     print(f"【4/6】执行 pytest（浏览器 {browser}）...")
-    exec_target = saved[0] if len(saved) == 1 else dir_for_confirm
-    result = test_runner.run_pytest(
+    exec_target = saved[0] if len(saved) == 1 else saved
+    execute = runner or test_runner.run_pytest
+    result = execute(
         exec_target, browser=browser, timeout=timeout, allure=allure, profile=profile,
     )
     report.exec_result = result.to_dict()
@@ -149,8 +172,7 @@ def run_pipeline(
     # ---- 8. 失败分析（Day 22~26）----
     if result.success:
         print("【5/6】全部通过，无需缺陷分析。")
-        report.full = report.__dict__.copy()
-        return report
+        return report.finish("passed")
 
     print("【5/6】收集失败信息 + AI 缺陷分析 ...")
     defect_agent = DefectAnalysisAgent(client, runner=runner)
@@ -170,6 +192,6 @@ def run_pipeline(
         "exec_result": report.exec_result,
         "defect_report": defect_report.to_dict(),
     }
-    out = report.save()
-    print(f"\n【6/6】流水线完成，汇总报告：{out}")
+    report.finish("execution_failed")
+    print(f"\n【6/6】流水线完成，汇总报告：{settings.OUTPUT_DIR / 'pipeline_report.yaml'}")
     return report

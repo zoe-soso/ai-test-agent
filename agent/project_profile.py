@@ -261,12 +261,16 @@ def _from_dict(name: str, data: dict[str, Any]) -> ProjectProfile:
     """把 YAML 字典转成 ProjectProfile。字段缺失就用默认值，不报错。"""
     target = data.get("target") or {}
     project_dir = Path(
-        target.get("project_dir")
-        or os.getenv("TEST_PROJECT_DIR")
+        os.getenv("TEST_PROJECT_DIR")
+        or target.get("project_dir")
         or str(settings.TEST_PROJECT_DIR)
     )
+    if not project_dir.is_absolute():
+        project_dir = (settings.PROJECT_ROOT / project_dir).resolve()
     # python_exe 允许写相对路径（相对 project_dir），也允许绝对路径
-    exe_raw = target.get("python_exe") or "venv/Scripts/python.exe"
+    exe_raw = os.getenv("TEST_PROJECT_PYTHON") or target.get("python_exe") or (
+        "venv/Scripts/python.exe" if os.name == "nt" else "venv/bin/python"
+    )
     exe = Path(exe_raw)
     if not exe.is_absolute():
         exe = project_dir / exe

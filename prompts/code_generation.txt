@@ -61,6 +61,8 @@ def test_login_success(page_context, email, password, expected):
    不要编造不存在的账号，否则登录必然失败。
 5. 不要用 try/except 吞掉断言失败；不要用 time.sleep 等待。
 6. 推荐加 @allure.feature / @allure.story 和 with allure.step(...) 步骤。
+7. 文字步骤可以合并为一次页面方法调用。登录时输入邮箱、输入密码、提交三步，统一调用 login(email, password)，不要拆成不存在的 enter_email、enter_password 或 click_login_button。
+8. 使用 is_login_success 时必须传入预期用户名，例如 is_login_success("zoe")。
 
 【输出格式】
 只输出**一个** python 代码块，内容是完整可运行的测试文件。

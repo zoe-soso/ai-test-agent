@@ -55,6 +55,7 @@ from typing import Any
 
 from agent import llm_client, project_profile
 from agent.models import TestCase
+from agent.page_contract import argument_issues, load_signatures
 from config import settings
 from prompts import loader
 from tools import file_io
@@ -335,7 +336,11 @@ def validate_code(
 
     # ---- 5. 方法真实性检查：调的方法在页面对象里真的存在吗？ ----
     # 这是抓"模型编造方法名"的关键一道关（详见 load_page_methods 的注释）。
+    prof = profile if profile is not None else project_profile.load_profile()
+    signatures = load_signatures(prof, page_module, page_class)
     real_methods = load_page_methods(page_module, profile)
+    if signatures:
+        real_methods &= signatures.keys()
     if real_methods:
         _page_var, called_methods = _find_page_calls(tree, page_class)
         unknown = sorted({m for m in called_methods if m not in real_methods})
@@ -347,6 +352,8 @@ def validate_code(
             )
         elif not called_methods:
             issues.append(f"没有看到任何通过 {page_class} 调用的方法，测试可能是空的")
+
+    issues.extend(argument_issues(tree, page_class, signatures))
 
     # ---- 6. 有没有先打开被测站点 ----
     # 页面对象里的 open_login_page() 只是点击页面上的"登录"链接，
@@ -411,7 +418,12 @@ class CodeGenerator:
             logger.info(
                 "%s 代码检查发现 %d 处问题，启动自修正", result.case_id, len(issues)
             )
-            fix_prompt = loader.load(FIX_TEMPLATE, errors="\n".join(f"- {i}" for i in issues), raw=raw)
+            fix_prompt = loader.load(
+                FIX_TEMPLATE, errors="\n".join(f"- {i}" for i in issues), raw=raw,
+                page_class=page_class, page_module=page_module,
+                page_methods=self._method_hint(page_class, page_module),
+                page_hint=page_hint,
+            )
             raw = self.client.chat_messages(fix_prompt.to_messages(), mock_hint="code")
             code = extract_python_code(raw)
             issues = validate_code(code, page_class, page_module, self.profile)
@@ -429,7 +441,11 @@ class CodeGenerator:
     # ------------------------------------------------------------------
     def save(self, result: GeneratedCode, filename: str | None = None) -> Path:
         """把代码保存到 generated_tests/ 目录。"""
+        if not result.ok:
+            raise ValueError("代码检查未通过，不能保存为可执行脚本")
         name = filename or result.filename
+        if not name or Path(name).name != name:
+            raise ValueError("脚本文件名不能包含目录")
         if not name.endswith(".py"):
             name += ".py"
         target = settings.GENERATED_DIR / name
@@ -439,6 +455,16 @@ class CodeGenerator:
         return target
 
     # ------------------------------------------------------------------
+    def _method_hint(self, page_class: str, page_module: str) -> str:
+        methods = load_page_methods(page_module, self.profile)
+        signatures = load_signatures(self.profile, page_module, page_class)
+        if signatures:
+            methods &= signatures.keys()
+        return " / ".join(
+            f"{method}{signatures[method]}" if method in signatures else method
+            for method in sorted(methods) if not method.startswith("__")
+        )
+
     def _call(
         self,
         feature: str,
@@ -452,8 +478,7 @@ class CodeGenerator:
         # 这是防止模型编造方法名最有效的一招：
         # 与其等它写错了再用检查去纠错，不如**一开始就给它准确的清单**。
         # （纠错要花第二次调用的钱，而且它第二次还可能编出新的错名字。）
-        real_methods = load_page_methods(page_module, self.profile)
-        page_methods = "、".join(sorted(m for m in real_methods if not m.startswith("__")))
+        page_methods = self._method_hint(page_class, page_module)
 
         prompt = loader.load(
             self.template,

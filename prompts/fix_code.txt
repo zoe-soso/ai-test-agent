@@ -6,6 +6,13 @@
 $errors
 
 【重申硬性约束】
+目标页面类：from $page_module import $page_class
+可用方法和参数：$page_methods
+主要业务方法：$page_hint
+只能调用清单里的方法；不得为每个文字步骤编造一个方法。
+登录的“输入邮箱、输入密码、提交”统一调用 login(email, password)。
+is_login_success(username) 必须传入预期用户名。
+
 1. 必须 POM：测试函数里禁止出现 page.locator(...) / page.click(...) / page.fill(...) 裸 API
 2. 必须 import 页面对象
 3. 测试函数签名必须带 page_context 固件

@@ -1,104 +1,54 @@
-# 基于 LLM 的 Web 智能测试用例生成与缺陷分析 Agent
+# Web 测试用例生成与缺陷分析 Agent
 
-> 与 `ecommerce-test-automation`（pytest + Playwright + POM）配套使用：本项目是它的"智能测试副驾"，
-> 负责从需求生成用例与代码、执行并分析失败，并**对它只读，不修改其中任何文件**。
+![CI](https://github.com/zoe-soso/ai-test-agent/actions/workflows/test.yml/badge.svg)
 
-## 这个项目要做什么
+输入测试需求，调用 DeepSeek 生成用例和 Playwright 脚本，再借用 [电商自动化项目](https://github.com/zoe-soso/ecommerce-test-automation) 的页面对象与测试环境执行。失败后收集日志和截图路径，交给模型分析原因。
 
-```
-自然语言需求  →  AI 分析  →  结构化测试用例  →  Playwright 代码
-      →  人工确认  →  pytest 执行  →  截图/日志  →  AI 失败分析  →  测试报告
+```text
+需求 → 用例生成和评审 → 代码生成和检查 → 人工确认 → pytest → 结果与失败分析
 ```
 
-采用 **Human-in-the-loop**：AI 生成的代码在执行前必须人工确认。
-这不是"偷懒"，而是生产环境的基本要求——不能让 Agent 随便执行它自己写的代码。
+代码检查包含 Python 语法、POM 使用、方法存在性和可静态确定的调用参数。不合格代码不会进入执行，但静态检查不能保证业务断言正确。默认执行前询问确认，`--auto` 会跳过确认。
 
-## 环境隔离说明（重要）
+## 运行
 
-| 项目 | 虚拟环境 | 主要依赖 |
-|---|---|---|
-| `ecommerce-test-automation` | 它自己的 `venv/`（Python 3.12.1） | playwright, pytest, allure-pytest, PyYAML, faker |
-| 本项目 `ai-test-agent` | 自己的 `venv/`（Python 3.12.1） | openai, python-dotenv, PyYAML, pytest |
+两个项目各自建立虚拟环境。先按电商项目的 README 安装依赖和 Chromium，再在本项目根目录执行：
 
-两个项目各自独立建环境，原因：
-
-1. 依赖互不污染。以后接 LangGraph、重试库等，不会影响已能跑通的测试项目。
-2. 两份 `requirements.txt` 各管各的，交付和复现都干净。
-3. Agent 需要跑 pytest 时，用**绝对路径**跨环境调用测试项目的解释器：
-   `D:/PythonProjects/ecommerce-test-automation/venv/Scripts/python.exe -m pytest`
-   这是很常见的跨环境编排方式，也是面试能讲的设计点。
-
-Python 版本刻意选成和测试项目一致的 3.12.1，避免两边行为不一致。
-
-## 快速开始
-
-```bash
-# 1. 建虚拟环境（Windows）
+```powershell
 python -m venv venv
-
-# 2. 激活
-venv\Scripts\activate
-
-# 3. 装依赖
-pip install -r requirements.txt
-
-# 4. 配置密钥
-cp .env.example .env     # 然后填入 LLM_API_KEY
-
-# 5. 自检
-python main.py
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-## 目录结构
+在 `.env` 中填写 `LLM_API_KEY`，确认 `LLM_BASE_URL`、`LLM_MODEL`；真实调用使用 `LLM_MOCK=false`。密钥文件不要提交。
 
-```
-ai-test-agent/
-├── agent/          # Agent 核心：LLM 客户端、用例生成、用例构建
-├── tools/          # 工具层：日志、文件读写、异常定义
-├── prompts/        # Prompt 模板（.txt，和代码分离，改文案不用改代码）
-├── config/         # 全局配置与路径
-├── data/           # 输入：需求文档
-├── outputs/        # 产出：测试用例 YAML、报告
-├── tests/          # 本项目自身的单元测试
-├── logs/           # 运行日志
-├── main.py         # 命令行入口
-└── requirements.txt
-```
+```powershell
+# 检查环境
+.\venv\Scripts\python.exe main.py check
 
-## 进度概览
+# 生成、检查并执行一份登录脚本，执行前人工确认
+.\venv\Scripts\python.exe main.py run --profile ecommerce --feature "用户登录功能" --limit 1
 
-项目按能力拆成以下模块，均已实现并通过测试：
+# 已确认生成代码的使用范围时，可加 --auto 跳过询问
+# --allure 可额外输出 Allure 原始数据
 
-- **需求理解与用例生成** — 读取自然语言需求，输出结构化的测试用例（覆盖正常流程、边界值、异常场景），含用例自动评审与测试数据生成。
-- **代码生成（Playwright + POM）** — 把测试用例转成可执行的 Playwright 代码；生成前做静态检查，校验页面对象方法是否存在，防止大模型"编造"不存在的方法。
-- **执行与人工确认** — 采用 Human-in-the-loop：AI 生成的代码在执行前必须人工确认；通过跨环境调用被测项目的 pytest 来实际跑测试。
-- **失败分析与缺陷定位** — 收集失败截图与日志，由 AI 判定缺陷类别（6 类白名单）与严重度（P0–P3），并区分"偶发失败"与"稳定缺陷"，避免把网络抖动误报成 bug。
-- **全链路流水线** — 一条命令把"需求 → 用例 → 代码 → 执行 → 分析"跑完，产出汇总报告。
-- **多项目适配** — 通过 profile 档案接入任意 Playwright + POM 项目，换被测网站无需改代码（见下文）。
-- **评测体系** — 三套可复现指标：用例覆盖率、代码首版通过率、缺陷分析准确率。
-
-## 适配不同被测项目
-
-"接哪个被测项目"由 `config/profiles/<名字>.yaml` 一份档案决定，不再硬编码。换被测网站只需复制
-一份 yaml 改两行再 `--profile 名字` 指定，代码一行不动；页面类甚至能自动扫描发现。
-
-```bash
-python main.py run --profile ecommerce --feature "用户登录功能" --auto
-python main.py run --profile myproject --feature "登录功能"   # 接新项目
+# 离线单元测试，不调用模型
+$env:LLM_MOCK = "true"
+.\venv\Scripts\python.exe -m pytest -q
+# 恢复由 .env 决定运行模式
+Remove-Item Env:LLM_MOCK
 ```
 
-## 评测体系
+目标项目由 `config/profiles/ecommerce.yaml` 指定。默认路径适用于当前目录布局；目录不同时设置 `TEST_PROJECT_DIR`，解释器可用 `TEST_PROJECT_PYTHON` 指定。接其他项目还需核对页面类、方法、fixture 和配置读取方式。
 
-三套评测都不依赖浏览器，可每天跑、可复现：
+## 文件与结果
 
-```bash
-python eval/eval_coverage.py          # 用例场景覆盖率
-python eval/eval_code_passrate.py     # 代码首版 / 修正后通过率
-python eval/eval_defect_accuracy.py   # 缺陷分析准确率（含人工标注集）
-```
+`agent/` 放生成、评审和分析逻辑，`tools/` 放执行器与工具，`prompts/` 放提示模板。生成脚本在 `generated_tests/`，用例、汇总报告和运行产物在 `outputs/`。运行会保存 `outputs/pipeline_report.yaml`；命令退出码为 0 表示通过，1 表示执行失败，2 表示取消，3 表示生成未通过检查。
 
-## 测试
+多文件执行只包含本次选中的脚本，不会顺带运行旧文件。执行器复用目标项目源码，日志和报告写入 Agent 的输出目录。
 
-```bash
-python -m pytest     # 107 个单元测试，全绿
-```
+## 测试范围
+
+CI 分别运行离线单元测试，以及已保存登录脚本的 Chromium 集成冒烟。集成冒烟验证与电商项目的衔接，不调用 DeepSeek；真实生成效果需要配置密钥单独运行。依赖关联项目或特定平台的单元测试可能跳过。
+
+`eval/` 下有场景覆盖、代码检查通过率和缺陷分类评测。其中代码通过率是**静态检查通过率**，不是浏览器执行通过率；关键词覆盖也不等于完整业务覆盖。

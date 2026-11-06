@@ -103,11 +103,13 @@ LLM_MOCK_STYLE: str = os.getenv("LLM_MOCK_STYLE", "cycle").lower()
 TEST_PROJECT_DIR = Path(
     os.getenv(
         "TEST_PROJECT_DIR",
-        r"D:/PythonProjects/ecommerce-test-automation",
+        str(PROJECT_ROOT.parent.parent / "ecommerce-test-automation"),
     )
 )
 # 测试项目自己的解释器。之后 Agent 要跑 pytest 时用它，而不是本项目 venv。
-TEST_PROJECT_PYTHON = TEST_PROJECT_DIR / "venv" / "Scripts" / "python.exe"
+TEST_PROJECT_PYTHON = Path(os.getenv("TEST_PROJECT_PYTHON") or str(
+    TEST_PROJECT_DIR / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+))
 
 # ------------------------------------------------------------------
 # 5. 日志配置（Day 4 使用）
@@ -161,7 +163,7 @@ def describe() -> dict:
         "离线 Mock 策略": LLM_MOCK_MODE,
         "关联测试项目": str(TEST_PROJECT_DIR),
         "测试项目解释器是否存在": TEST_PROJECT_PYTHON.exists(),
-        "测试项目是否被改动过": "否（本项目只读引用）",
+        "目标项目使用方式": "读取源码并调用测试；此处未检查 Git 状态",
     }
 
 

@@ -73,6 +73,46 @@ jobs:
           path: .pytest_cache
           retention-days: 7
 
+  integration-smoke:
+    runs-on: ubuntu-latest
+    env:
+      AI_AGENT_TARGET_PROJECT: ${{ github.workspace }}/target
+      TEST_ARTIFACT_DIR: ${{ github.workspace }}/agent/outputs/target-artifacts
+      PYTHONPATH: ${{ github.workspace }}/target
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Checkout Agent
+        uses: actions/checkout@v4
+        with:
+          path: agent
+      - name: Checkout test project
+        uses: actions/checkout@v4
+        with:
+          repository: zoe-soso/ecommerce-test-automation
+          path: target
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install browser test dependencies
+        run: |
+          python -m venv target/venv
+          target/venv/bin/python -m pip install -r target/requirements.txt
+          target/venv/bin/python -m playwright install --with-deps chromium
+      - name: Run saved login script
+        working-directory: target
+        run: |
+          venv/bin/python -m pytest "$GITHUB_WORKSPACE/agent/generated_tests/test_tc_login_001.py" \
+            -o addopts= -p no:cacheprovider --browser chromium --reruns 0 \
+            --junitxml="$GITHUB_WORKSPACE/agent/outputs/integration.xml" -q
+      - name: Upload integration results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-result
+          path: agent/outputs/
+          retention-days: 7
+
 # ==========================================================
 # （可选）想在 README 顶部显示绿勾徽章，加这一行：
 #

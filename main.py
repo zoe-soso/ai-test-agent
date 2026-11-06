@@ -659,7 +659,7 @@ def cmd_code(args: argparse.Namespace) -> int:
         print(f"\n  {item.describe()}")
         for issue in item.issues:
             print(f"      [!] {issue}")
-        if not item.code:
+        if not item.ok:
             continue
 
         if args.yes or ask_yes_no(f"      是否保存 {item.filename}？", default=True):
@@ -722,7 +722,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"  运行模式 : {'Mock（离线）' if client.is_mock else '真实调用'}")
     print("=" * 60)
 
-    run_pipeline(
+    report = run_pipeline(
         client,
         feature=args.feature,
         description=args.description,
@@ -734,7 +734,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         max_repairs=args.max_repairs,
         profile=profile,
     )
-    return 0
+    return report.exit_code
 
 
 

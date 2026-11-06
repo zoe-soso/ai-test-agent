@@ -70,6 +70,11 @@ if _tp is not None:
     # 把对方的固件原样导出，pytest 就能在本目录里使用它们
     page_context = _tp.page_context
     ensure_test_account = _tp.ensure_test_account
+
+    def pytest_configure(config):
+        hook = getattr(_tp, "pytest_configure", None)
+        if hook is not None:
+            hook(config)
 else:
     # 兜底：自己定义一个简易版 page_context，保证测试至少能被收集和执行
     @pytest.fixture(scope="function")
@@ -99,7 +104,8 @@ else:
 # 那个子进程的 sys.path 里只有对方项目根，import 不到我们的 config。
 # 所以用相对路径直接算出来最稳：
 #   generated_tests/conftest.py -> parent.parent = 项目根 ai-test-agent/
-SCREENSHOT_DIR = Path(__file__).resolve().parent.parent / "outputs" / "screenshots"
+SCREENSHOT_DIR = Path(os.environ.get("AI_AGENT_SCREENSHOT_DIR") or
+                      str(Path(__file__).resolve().parent.parent / "outputs" / "screenshots"))
 
 
 def _safe_name(nodeid: str) -> str:

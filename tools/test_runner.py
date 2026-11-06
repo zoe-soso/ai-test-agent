@@ -141,7 +141,7 @@ class TestRunResult:
 
 
 def run_pytest(
-    target: str | Path | None = None,
+    target: str | Path | list[str | Path] | None = None,
     *,
     browser: str = "chromium",
     timeout: int = 300,
@@ -169,19 +169,16 @@ def run_pytest(
     # Day 28：执行环节的项目根也由档案决定，做到"生成 = 执行"同源。
     project_dir = profile.project_dir if profile is not None else settings.TEST_PROJECT_DIR
 
-    target_path = Path(target) if target else settings.GENERATED_DIR
-    if not target_path.is_absolute():
-        # 相对路径到底相对谁？pytest 子进程的 cwd 是**目标项目根**
-        # （见下方 subprocess.run 的 cwd=project_dir）。
-        # 所以 AI 工具（如 rerun_test）给来的相对路径（可能带 ..\）也
-        # 是相对目标项目根的。因此这里对相对路径按目标项目根解析，
-        # 再用 .resolve() 把 ..\ 归一化成干净绝对路径 —— 否则路径会
-        # 和 PROJECT_ROOT 重复拼接、变成"甲\..\甲\..."，pytest 直接
-        # 报"命令行用法错误（exit 4）"。
-        target_path = (project_dir / target_path).resolve()
-    else:
-        # 绝对路径也归一化，去掉可能残留的 ..\（统一成最干净的形式）
-        target_path = target_path.resolve()
+    targets = target if isinstance(target, list) else [target or settings.GENERATED_DIR]
+    target_paths = []
+    for value in targets:
+        target_path = Path(value)
+        if not target_path.is_absolute():
+            # pytest 的 cwd 是目标项目根，重跑工具返回的相对路径也按它解析。
+            target_path = (project_dir / target_path).resolve()
+        else:
+            target_path = target_path.resolve()
+        target_paths.append(str(target_path))
 
     # 解释器：显式传 > 档案指定 > settings 默认
     if python_exe is not None:
@@ -194,7 +191,7 @@ def run_pytest(
     command = [
         interpreter,
         "-m", "pytest",
-        str(target_path),
+        *target_paths,
         # 关键：清空对方 pytest.ini 里预设的 addopts。
         # 对方的 addopts 里有 --html=reports/report.html 和 --alluredir=...，
         # 那会在**对方项目里写出测试报告文件**——我们约定不改动对方项目，
@@ -225,6 +222,10 @@ def run_pytest(
     # 以前它是**自己又硬编码了一份**，两处真值不同步就会出现
     # "按 A 项目生成代码、却按 B 项目去执行"的诡异问题。现在单一真值来源。
     env["AI_AGENT_TARGET_PROJECT"] = str(project_dir)
+    env["TEST_ARTIFACT_DIR"] = str(settings.OUTPUT_DIR / "target-artifacts")
+    env["AI_AGENT_SCREENSHOT_DIR"] = str(settings.SCREENSHOT_DIR)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    command.extend(["-p", "no:cacheprovider"])
 
     logger.info("执行 pytest（工作目录：%s）", project_dir)
     logger.info("命令：%s", " ".join(command))
